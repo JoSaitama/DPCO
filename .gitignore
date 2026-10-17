@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime data and generated artifacts are not source code.
+/data/
+/datasets/
+/runs/
+/outputs/
+/checkpoints/
+*.ckpt
+*.tfrecord*
+*.tar
+*.tar.gz
+*.npz
+*.npy
+.env
+.env.*
+!.env.example
+
+# Local development protocols and research notes stay outside this repository.
+AGENTS.md
+AGENTS.local.md

@@ -1,0 +1,23 @@
+seed = 0
+global_batch_size = 64
+
+[data]
+name = "imagenet100"
+num_classes = 100
+image_size = 224
+# A manifest must be selected before training; no class list is invented here.
+class_manifest = "configs/manifests/imagenet100_classes.txt"
+
+[model]
+name = "resnet50"
+
+[method]
+name = "sgd"
+flip_probability = 0.25
+
+[reference]
+name = "loss"
+
+[training]
+# Pilot placeholder; not an experimentally tuned learning rate.
+learning_rate = 0.01

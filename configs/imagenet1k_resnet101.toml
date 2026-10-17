@@ -1,0 +1,20 @@
+seed = 0
+global_batch_size = 64
+
+[data]
+name = "imagenet1k"
+num_classes = 1000
+image_size = 224
+
+[model]
+name = "resnet101"
+
+[method]
+name = "sgd"
+flip_probability = 0.25
+
+[reference]
+name = "loss"
+
+[training]
+learning_rate = 0.01

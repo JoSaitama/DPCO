@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sage-research"
+version = "0.1.0"
+description = "Modular sample-contribution optimization experiments in JAX."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["jax"]
+train = ["jax", "flax", "optax", "tensorflow", "tensorflow-datasets"]
+tpu = ["jax[tpu]"]
+
+[project.scripts]
+sage-config = "src.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
