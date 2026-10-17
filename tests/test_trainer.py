@@ -21,7 +21,7 @@ class TrainerTests(unittest.TestCase):
         self.assertEqual(result.model_state["calls"], 1)
         self.assertEqual(initial.model_state["calls"], 0)
         np.testing.assert_array_equal(initial.params["x"], [0.])
-        self.assertEqual(metrics, {})
+        self.assertEqual(int(metrics["valid_batch_size"]), 3)
 
     def test_all_six_methods_use_same_trainer_and_task(self):
         for name in ("sgd", "sage", "sage_loo", "dtv", "dtv_loo", "random_flip"):

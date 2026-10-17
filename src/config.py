@@ -16,6 +16,7 @@ class DataConfig:
     num_classes: int
     image_size: int = 224
     class_manifest: str | None = None
+    mode: str = "clean"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,43 @@ class ReferenceConfig:
 @dataclass(frozen=True)
 class TrainingConfig:
     learning_rate: float = 0.01
+    total_steps: int = 100
+
+
+@dataclass(frozen=True)
+class LoggingConfig:
+    mode: str = "steps"
+    interval: float = 5
+    csv_flush_steps: int = 50
+    timing_window_steps: int = 50
+
+
+@dataclass(frozen=True)
+class EvaluationConfig:
+    mode: str = "epochs"
+    interval: float = 1
+
+
+@dataclass(frozen=True)
+class CheckpointConfig:
+    latest_every_steps: int = 100
+    at_epoch_end: bool = False
+
+
+@dataclass(frozen=True)
+class ProbeConfig:
+    enabled: bool = False
+    theorem1: bool = True
+    theorem2: bool = True
+    theorem3: bool = True
+    fractions: tuple[float, ...] = (0., .25, .5, .75, 1.)
+    batches_per_node: int = 3
+    lr_scales: tuple[float, ...] = (1., .5, .25, .125, .0625)
+
+
+@dataclass(frozen=True)
+class ResultsConfig:
+    root_dir: str = "results"
 
 
 @dataclass(frozen=True)
@@ -46,6 +84,11 @@ class RunConfig:
     method: MethodConfig = MethodConfig()
     reference: ReferenceConfig = ReferenceConfig()
     training: TrainingConfig = TrainingConfig()
+    results: ResultsConfig = ResultsConfig()
+    logging: LoggingConfig = LoggingConfig()
+    evaluation: EvaluationConfig = EvaluationConfig()
+    checkpoints: CheckpointConfig = CheckpointConfig()
+    probes: ProbeConfig = ProbeConfig()
     seed: int = 0
     global_batch_size: int = 64
 
@@ -69,6 +112,26 @@ class RunConfig:
             raise ValueError("Batch size and image size must be positive")
         if not math.isfinite(self.training.learning_rate) or self.training.learning_rate <= 0:
             raise ValueError("learning_rate must be positive and finite")
+        if not isinstance(self.results.root_dir, str) or not self.results.root_dir.strip():
+            raise ValueError("results.root_dir must be a nonempty path")
+        from src.training.schedules import validate_interval
+        validate_interval(self.logging.mode, self.logging.interval, ("steps", "percent"))
+        validate_interval(self.evaluation.mode, self.evaluation.interval, ("steps", "epochs"))
+        for value in (self.training.total_steps, self.logging.csv_flush_steps,
+                      self.logging.timing_window_steps, self.checkpoints.latest_every_steps,
+                      self.probes.batches_per_node):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError("Step counts and probe batch counts must be positive integers")
+        if not self.probes.fractions or any(not math.isfinite(p) or not 0 <= p <= 1
+                                            for p in self.probes.fractions):
+            raise ValueError("Probe fractions must be finite values in [0, 1]")
+        if not self.probes.lr_scales or any(not math.isfinite(s) or s <= 0
+                                            for s in self.probes.lr_scales):
+            raise ValueError("Probe learning-rate scales must be positive and finite")
+        if self.probes.enabled and self.method.name != "sage":
+            raise ValueError("Common-reference theorem probes currently require full sage")
+        if not self.data.mode or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-." for c in self.data.mode):
+            raise ValueError("data.mode must be a safe name such as clean or mismatch10")
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -83,6 +146,11 @@ def load_config(path: str | Path) -> RunConfig:
         method=MethodConfig(**raw.pop("method", {})),
         reference=ReferenceConfig(**raw.pop("reference", {})),
         training=TrainingConfig(**raw.pop("training", {})),
+        results=ResultsConfig(**raw.pop("results", {})),
+        logging=LoggingConfig(**raw.pop("logging", {})),
+        evaluation=EvaluationConfig(**raw.pop("evaluation", {})),
+        checkpoints=CheckpointConfig(**raw.pop("checkpoints", {})),
+        probes=ProbeConfig(**raw.pop("probes", {})),
         **raw,
     )
     config.validate()

@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 
 from src.signals.gradient_alignment import gradient_alignment
+from src.training.metrics import task_metrics, tree_dot
 
 
 class MethodResult(NamedTuple):
@@ -65,17 +66,17 @@ def weighted_direction(task, params, batch, model_state, method_state, weights_f
     def objective(p):
         result = task.evaluate(p, batch, model_state)
         weights = weights_fn(result.valid_mask)
-        return mean_loss(result.losses, weights, result.valid_mask), result.model_state
+        return mean_loss(result.losses, weights, result.valid_mask), (result.model_state, task_metrics(result))
 
-    (_, next_model_state), direction = jax.value_and_grad(objective, has_aux=True)(params)
-    # No new observation fields or persistent data collection are introduced.
-    return MethodResult(direction, next_model_state, method_state, {})
+    (_, (next_model_state, metrics)), direction = jax.value_and_grad(objective, has_aux=True)(params)
+    return MethodResult(direction, next_model_state, method_state, metrics)
 
 
 @dataclass(frozen=True)
 class AlignmentMethod:
     reference: Any
     exclude_self: bool = False
+    record_theory: bool = False
 
     def weights(self, scores, has_reference, valid_mask):
         raise NotImplementedError
@@ -90,14 +91,27 @@ class AlignmentMethod:
         """
         def losses_fn(p):
             result = task.evaluate(p, batch, model_state)
-            return result.losses, (result.model_state, result.feedback, result.valid_mask)
+            return result.losses, (result.model_state, result.feedback, result.valid_mask,
+                                   task_metrics(result))
 
-        gradients, (next_model_state, feedback, valid) = jax.jacrev(
+        gradients, (next_model_state, feedback, valid, metrics) = jax.jacrev(
             losses_fn, has_aux=True
         )(params)
         reference = self.reference.build(gradients, valid, feedback,
                                          exclude_self=self.exclude_self)
         scores = gradient_alignment(gradients, reference, valid)
         weights = self.weights(scores, reference.has_reference, valid)
-        return MethodResult(aggregate(gradients, weights, valid),
-                            next_model_state, method_state, {})
+        direction = aggregate(gradients, weights, valid)
+        if self.record_theory:
+            if self.exclude_self:
+                raise ValueError("Common-reference theory recording does not cover LOO")
+            count = jnp.sum(valid)
+            delta = jnp.sum(jnp.where(valid, (weights - 1.) * scores, 0.)) / count
+            metrics.update(theory_delta=delta,
+                           theory_negative_count=jnp.sum(valid & (scores < 0)),
+                           theory_flip_count=jnp.sum(valid & (weights < 0)),
+                           theory_error_count=jnp.sum(valid & feedback.get("error_mask", jnp.zeros_like(valid))),
+                           theory_reference_valid=reference.has_reference,
+                           theory_reference_projection_sgd=jnp.sum(jnp.where(valid, scores, 0.)) / count,
+                           theory_reference_projection_sage=tree_dot(reference.direction, direction))
+        return MethodResult(direction, next_model_state, method_state, metrics)

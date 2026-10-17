@@ -35,4 +35,7 @@ class ClassificationTask:
         in_range = (labels >= 0) & (labels < self.num_classes)
         losses = jnp.where(mask, jnp.where(in_range, losses, jnp.nan), 0.)
         errors = prediction_error(logits, labels, mask)
-        return TaskResult(losses, mask, next_state, {"error_mask": errors})
+        top_indices = jax.lax.top_k(logits, min(5, self.num_classes))[1]
+        top5 = jnp.any(top_indices == labels[:, None], axis=-1) & mask
+        return TaskResult(losses, mask, next_state,
+                          {"error_mask": errors, "top5_correct_mask": top5})

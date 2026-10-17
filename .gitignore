@@ -13,6 +13,7 @@ dist/
 # Runtime data and generated artifacts are not source code.
 /data/
 /datasets/
+/results/
 /runs/
 /outputs/
 /checkpoints/

@@ -5,6 +5,7 @@ global_batch_size = 64
 name = "imagenet1k"
 num_classes = 1000
 image_size = 224
+mode = "clean"
 
 [model]
 name = "resnet50"
@@ -18,3 +19,34 @@ name = "loss"
 
 [training]
 learning_rate = 0.01
+# Small integration budget, not a tuned full ImageNet training recipe.
+total_steps = 100
+
+[results]
+root_dir = "results"
+
+[logging]
+# Switch mode to "percent" and interval to 1 for total-budget percentage logs.
+mode = "steps"
+interval = 5
+csv_flush_steps = 50
+timing_window_steps = 50
+
+[evaluation]
+# Epoch intervals may also be 0.25 or 0.5; mode="steps" accepts an integer.
+mode = "epochs"
+interval = 1.0
+
+[checkpoints]
+latest_every_steps = 100
+at_epoch_end = false
+
+[probes]
+# Off means no extra theorem gradient/objective calculations.
+enabled = false
+theorem1 = true
+theorem2 = true
+theorem3 = true
+fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
+batches_per_node = 3
+lr_scales = [1.0, 0.5, 0.25, 0.125, 0.0625]

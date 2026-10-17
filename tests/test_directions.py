@@ -22,7 +22,7 @@ class DirectionTests(unittest.TestCase):
                 result = create_method(name).compute_direction(task, params, scalar_batch())
                 np.testing.assert_allclose(result.direction["x"], [value], atol=1e-6)
                 self.assertEqual(result.model_state["calls"], 1)
-                self.assertEqual(result.metrics, {})
+                self.assertEqual(int(result.metrics["valid_batch_size"]), 3)
 
     def test_filter_retains_original_batch_denominator(self):
         # [1,1,-1.5] -> filter last -> (1+1)/3, not (1+1)/2.

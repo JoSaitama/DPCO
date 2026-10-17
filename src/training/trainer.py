@@ -29,4 +29,8 @@ class Trainer:
             updated.params, result.model_state, result.method_state,
             updated.optimizer_state, state.step + 1,
         )
-        return next_state, result.metrics
+        import jax
+        import jax.numpy as jnp
+        finite = jnp.all(jnp.array([jnp.all(jnp.isfinite(leaf))
+                                   for leaf in jax.tree_util.tree_leaves(updated.params)]))
+        return next_state, {**result.metrics, "parameters_finite": finite}
