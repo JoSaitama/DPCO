@@ -6,6 +6,11 @@ from src.references.base import selected_mean
 
 
 class ErrorSubsetReference:
+    def selection_mask(self, valid_mask, feedback):
+        if "error_mask" not in feedback:
+            raise ValueError("Error reference requires error_mask feedback")
+        return jnp.asarray(valid_mask, dtype=bool) & jnp.asarray(feedback["error_mask"], dtype=bool)
+
     def build(self, gradients, valid_mask, feedback, *, exclude_self=False):
         if "error_mask" not in feedback:
             raise ValueError("ErrorSubsetReference requires task error_mask feedback")

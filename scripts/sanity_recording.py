@@ -1,4 +1,4 @@
-"""Exercise real recording/checkpoint/probe paths using synthetic CPU batches.
+"""CPU sanity: exercise recording/checkpoint/probe paths using synthetic batches.
 
 No configured ResNet or ImageNet data is instantiated. Without --output-root,
 artifacts are created in a temporary directory and removed after verification.
@@ -74,7 +74,7 @@ def exercise(output_root, config_path, enable_probes):
         objective_mode="deterministic_linear", audit_objective=audit, audit_name="synthetic_fixed_audit")
     runner = ExperimentRunner(config, trainer, source, evaluation, base_dir=ROOT,
         train_sample_count=6, probes=probes,
-        metadata={"execution_kind": "synthetic_cpu_smoke", "actual_model": "linear_softmax",
+        metadata={"execution_kind": "synthetic_cpu_sanity", "actual_model": "linear_softmax",
                   "actual_dataset": "three_synthetic_examples", "actual_valid_batch_size": 3,
                   "configured_model_and_dataset_are_not_loaded": True})
     final = runner.run(state)
@@ -104,9 +104,9 @@ def main():
         root = args.output_root if args.output_root.is_absolute() else ROOT / args.output_root
         exercise(root, config_path, args.probes)
     else:
-        with TemporaryDirectory(prefix="sage-recording-smoke-") as directory:
+        with TemporaryDirectory(prefix="sage-recording-sanity-") as directory:
             exercise(Path(directory), config_path, args.probes)
-        print("Temporary smoke artifacts removed; pass --output-root to retain them.")
+        print("Temporary sanity artifacts removed; pass --output-root to retain them.")
 
 
 if __name__ == "__main__":

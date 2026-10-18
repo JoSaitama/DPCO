@@ -1,7 +1,7 @@
 """Construct methods once; the trainer does not branch on method names."""
 
 
-def create_method(name, *, reference_name="loss", flip_probability=0.25):
+def create_method(name, *, reference_name="loss", flip_probability=0.25, gradient_backend="audit"):
     if name == "sgd":
         from src.methods.sgd import SGD
         return SGD()
@@ -14,7 +14,7 @@ def create_method(name, *, reference_name="loss", flip_probability=0.25):
         exclude_self = name.endswith("_loo")
         if name.startswith("sage"):
             from src.methods.sage import SAGE
-            return SAGE(reference, exclude_self)
+            return SAGE(reference, exclude_self, gradient_backend=gradient_backend)
         from src.methods.dtv import DTV
-        return DTV(reference, exclude_self)
+        return DTV(reference, exclude_self, gradient_backend=gradient_backend)
     raise ValueError(f"Unknown method: {name}")

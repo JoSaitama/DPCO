@@ -14,6 +14,7 @@ class EvaluationSpec:
     batches: object
     expected_sample_count: int
     mode: str = "eval"
+    batch_metrics: object = None
 
     def evaluate(self, state):
         """The caller supplies a deterministic evaluation-mode model adapter."""
@@ -21,7 +22,9 @@ class EvaluationSpec:
             raise ValueError("Validation sample count must be positive")
         totals = None
         for batch in self.batches():
-            metrics = task_metrics(self.task.evaluate(state.params, batch, state.model_state), include_top5=True)
+            metrics = (self.batch_metrics(state.params, batch, state.model_state)
+                       if self.batch_metrics is not None else
+                       task_metrics(self.task.evaluate(state.params, batch, state.model_state), include_top5=True))
             values = {key: metrics[key] for key in ("valid_batch_size", "loss_sum", "correct_count", "top5_count")}
             totals = values if totals is None else {key: totals[key] + values[key] for key in values}
         if totals is None:

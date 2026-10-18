@@ -17,11 +17,16 @@ class DataConfig:
     image_size: int = 224
     class_manifest: str | None = None
     mode: str = "clean"
+    hf_repo_id: str = "ILSVRC/imagenet-1k"
+    hf_revision: str = "49e2ee26f3810fb5a7536bbf732a7b07389a47b5"
+    prepared_dir: str = "../data"
 
 
 @dataclass(frozen=True)
 class ModelConfig:
     name: str
+    initialization: str = "random"
+    precision: str = "float32"
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,15 @@ class ResultsConfig:
 
 
 @dataclass(frozen=True)
+class ExecutionConfig:
+    visible_chips: str = "0,1,2,3"
+    chips_per_process_bounds: str = "2,2,1"
+    port: int = 8476
+    startup_timeout_s: int = 180
+    gradient_backend: str = "audit"
+
+
+@dataclass(frozen=True)
 class RunConfig:
     data: DataConfig
     model: ModelConfig
@@ -89,6 +103,7 @@ class RunConfig:
     evaluation: EvaluationConfig = EvaluationConfig()
     checkpoints: CheckpointConfig = CheckpointConfig()
     probes: ProbeConfig = ProbeConfig()
+    execution: ExecutionConfig = ExecutionConfig()
     seed: int = 0
     global_batch_size: int = 64
 
@@ -108,6 +123,26 @@ class RunConfig:
             raise ValueError("imagenet100 requires a fixed class_manifest path")
         if self.model.name not in ("resnet50", "resnet101"):
             raise ValueError(f"Unsupported model: {self.model.name}")
+        if self.model.initialization != "random":
+            raise ValueError("The current optimizer comparison uses random initialization, not pretrained weights")
+        if self.model.precision not in ("float32", "bfloat16"):
+            raise ValueError("model.precision must be float32 or bfloat16")
+        if self.execution.gradient_backend not in ("audit", "jvp"):
+            raise ValueError("Unknown gradient backend")
+        if self.execution.gradient_backend == "jvp" and self.method.name.endswith("_loo"):
+            raise ValueError("The JVP backend currently supports full common references only")
+        if (not isinstance(self.execution.port, int) or not isinstance(self.execution.startup_timeout_s, int)
+                or not 1024 <= self.execution.port <= 65535 or self.execution.startup_timeout_s <= 0):
+            raise ValueError("Invalid runtime port or startup timeout")
+        for bounds in (self.execution.visible_chips, self.execution.chips_per_process_bounds):
+            if not bounds or any(not part.isdigit() for part in bounds.split(",")):
+                raise ValueError("TPU chip settings must be comma-separated nonnegative integers")
+        dimensions = self.execution.chips_per_process_bounds.split(",")
+        if len(dimensions) != 3 or any(int(part) <= 0 for part in dimensions):
+            raise ValueError("TPU chip bounds require three positive dimensions")
+        chips = self.execution.visible_chips.split(",")
+        if len(set(chips)) != len(chips) or math.prod(int(part) for part in dimensions) != len(chips):
+            raise ValueError("Visible TPU chips must be unique and match the chip-bounds product")
         if self.global_batch_size <= 0 or self.data.image_size <= 0:
             raise ValueError("Batch size and image size must be positive")
         if not math.isfinite(self.training.learning_rate) or self.training.learning_rate <= 0:
@@ -151,6 +186,7 @@ def load_config(path: str | Path) -> RunConfig:
         evaluation=EvaluationConfig(**raw.pop("evaluation", {})),
         checkpoints=CheckpointConfig(**raw.pop("checkpoints", {})),
         probes=ProbeConfig(**raw.pop("probes", {})),
+        execution=ExecutionConfig(**raw.pop("execution", {})),
         **raw,
     )
     config.validate()

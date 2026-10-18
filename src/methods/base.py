@@ -77,6 +77,7 @@ class AlignmentMethod:
     reference: Any
     exclude_self: bool = False
     record_theory: bool = False
+    gradient_backend: str = "audit"
 
     def weights(self, scores, has_reference, valid_mask):
         raise NotImplementedError
@@ -89,6 +90,11 @@ class AlignmentMethod:
         Empty reference positions retain the uncorrected sample contribution,
         preserving the old scaffold's explicit no-correction fallback.
         """
+        if self.gradient_backend == "jvp":
+            return self._directional(task, params, batch, model_state, method_state)
+        if self.gradient_backend != "audit":
+            raise ValueError("Unknown gradient backend")
+
         def losses_fn(p):
             result = task.evaluate(p, batch, model_state)
             return result.losses, (result.model_state, result.feedback, result.valid_mask,
@@ -115,3 +121,40 @@ class AlignmentMethod:
                            theory_reference_projection_sgd=jnp.sum(jnp.where(valid, scores, 0.)) / count,
                            theory_reference_projection_sage=tree_dot(reference.direction, direction))
         return MethodResult(direction, next_model_state, method_state, metrics)
+
+    def _directional(self, task, params, batch, model_state, method_state):
+        """Exact full-parameter scores via JVP, without a [B, P] Jacobian.
+
+        The reference and weights are frozen. VJP returns both reference and
+        weighted update gradients; JVP computes d(loss_vector)/dparams @ r.
+        Batch-dependent layers keep the same realized batch objective throughout.
+        """
+        if self.exclude_self:
+            raise ValueError("JVP currently supports full common references only")
+
+        def losses_fn(p):
+            result = task.evaluate(p, batch, model_state)
+            return result.losses, (result.model_state, result.feedback,
+                                   result.valid_mask, task_metrics(result))
+
+        losses, pullback, (next_state, feedback, valid, metrics) = jax.vjp(losses_fn, params, has_aux=True)
+        selected = self.reference.selection_mask(valid, feedback)
+        selected = jax.lax.stop_gradient(selected)
+        selected_count = jnp.sum(selected)
+        reference = pullback(selected.astype(losses.dtype) / jnp.maximum(selected_count, 1))[0]
+        reference = jax.tree_util.tree_map(jax.lax.stop_gradient, reference)
+        scores = jax.jvp(lambda p: task.evaluate(p, batch, model_state).losses,
+                         (params,), (reference,))[1]
+        weights = jax.lax.stop_gradient(self.weights(scores, selected_count > 0, valid))
+        count = jnp.sum(valid)
+        direction = pullback(weights.astype(losses.dtype) / count)[0]
+        if self.record_theory:
+            delta = jnp.sum(jnp.where(valid, (weights - 1.) * scores, 0.)) / count
+            metrics.update(theory_delta=delta,
+                theory_negative_count=jnp.sum(valid & (scores < 0)),
+                theory_flip_count=jnp.sum(valid & (weights < 0)),
+                theory_error_count=jnp.sum(valid & feedback.get("error_mask", jnp.zeros_like(valid))),
+                theory_reference_valid=selected_count > 0,
+                theory_reference_projection_sgd=jnp.sum(jnp.where(valid, scores, 0.)) / count,
+                theory_reference_projection_sage=tree_dot(reference, direction))
+        return MethodResult(direction, next_state, method_state, metrics)

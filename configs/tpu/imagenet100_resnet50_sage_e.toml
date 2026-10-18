@@ -1,0 +1,62 @@
+# Worker0-only TPU pilot. Smoke overrides the budget to 3 updates and limits data.
+seed = 0
+global_batch_size = 8
+
+[data]
+name = "imagenet100"
+num_classes = 100
+image_size = 224
+class_manifest = "configs/manifests/imagenet100_classes.txt"
+mode = "clean"
+hf_repo_id = "ILSVRC/imagenet-1k"
+hf_revision = "49e2ee26f3810fb5a7536bbf732a7b07389a47b5"
+prepared_dir = "../data"
+
+[model]
+name = "resnet50"
+initialization = "random"
+precision = "float32"
+
+[method]
+name = "sage"
+
+[reference]
+name = "error"
+
+[training]
+# Untuned pilot settings; configure the final budget before a benchmark.
+learning_rate = 0.01
+total_steps = 100
+
+[execution]
+visible_chips = "0,1,2,3"
+chips_per_process_bounds = "2,2,1"
+port = 8476
+startup_timeout_s = 180
+gradient_backend = "jvp"
+
+[results]
+root_dir = "results"
+
+[logging]
+mode = "steps"
+interval = 5
+csv_flush_steps = 50
+timing_window_steps = 50
+
+[evaluation]
+mode = "epochs"
+interval = 1.0
+
+[checkpoints]
+latest_every_steps = 100
+at_epoch_end = false
+
+[probes]
+enabled = false
+theorem1 = true
+theorem2 = true
+theorem3 = true
+fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
+batches_per_node = 3
+lr_scales = [1.0, 0.5, 0.25, 0.125, 0.0625]

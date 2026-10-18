@@ -10,9 +10,9 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["jax"]
-train = ["jax", "flax", "optax", "tensorflow", "tensorflow-datasets"]
-tpu = ["jax[tpu]"]
+test = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "Pillow>=11,<14", "filelock>=3"]
+train = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "Pillow>=11,<14", "datasets>=3,<6", "huggingface_hub>=0.30,<2", "filelock>=3"]
+tpu = ["jax[tpu]>=0.6,<0.12"]
 
 [project.scripts]
 sage-config = "src.cli:main"

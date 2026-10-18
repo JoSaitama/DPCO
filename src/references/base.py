@@ -16,6 +16,10 @@ class ReferenceResult:
 
 
 class Reference(Protocol):
+    def selection_mask(self, valid_mask: Any, feedback: Mapping[str, Any]) -> Any:
+        """Return selected contributions for exact common-reference VJP/JVP."""
+        ...
+
     def build(self, gradients: Any, valid_mask: Any, feedback: Mapping[str, Any],
               *, exclude_self: bool = False) -> ReferenceResult:
         """Build one common reference or per-sample self-excluded references."""

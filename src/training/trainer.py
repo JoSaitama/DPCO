@@ -34,3 +34,10 @@ class Trainer:
         finite = jnp.all(jnp.array([jnp.all(jnp.isfinite(leaf))
                                    for leaf in jax.tree_util.tree_leaves(updated.params)]))
         return next_state, {**result.metrics, "parameters_finite": finite}
+
+    def with_method(self, method):
+        return Trainer(self.task, method, self.updater)
+
+    def compile_step(self):
+        import jax
+        return jax.jit(self.step)

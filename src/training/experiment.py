@@ -23,7 +23,7 @@ from src.training.schedules import EventSchedule, milestone_steps
 class ExperimentRunner:
     def __init__(self, config, trainer, source, evaluation, *, base_dir,
                  train_sample_count, metadata, probes=None, console=True,
-                 run_name=None, resume=False):
+                 run_name=None, resume=False, reserved=False):
         config.validate()
         if train_sample_count <= 0:
             raise ValueError("train_sample_count must be positive")
@@ -40,11 +40,14 @@ class ExperimentRunner:
         self.config, self.trainer, self.source = config, trainer, source
         if isinstance(trainer.method, AlignmentMethod):
             record = config.probes.enabled and (config.probes.theorem1 or config.probes.theorem3)
-            self.trainer = type(trainer)(trainer.task, replace(trainer.method, record_theory=record), trainer.updater)
+            self.trainer = trainer.with_method(replace(trainer.method, record_theory=record))
         self.evaluation, self.probes = evaluation, probes
         self.sample_count = train_sample_count
         self.paths = ResultsPaths.resolve(config.results.root_dir, base_dir=base_dir).experiment(run_name or make_run_name(config))
-        self.paths.create(resume=resume)
+        if reserved and not resume:
+            self.paths.claim_reserved()
+        else:
+            self.paths.create(resume=resume)
         self.store = CheckpointStore(self.paths.runs)
         self.recorder = RunRecorder(self.paths, metadata={
             "run_name": self.paths.name, "config": config.as_dict(),
@@ -145,7 +148,7 @@ class ExperimentRunner:
             }, slots)
             timing("checkpoint", time.perf_counter() - before, checkpoint_bytes=size)
 
-        compiled_step = jax.jit(self.trainer.step)
+        compiled_step = self.trainer.compile_step()
         window_start = time.perf_counter()
         window_steps = window_samples = 0
         try:

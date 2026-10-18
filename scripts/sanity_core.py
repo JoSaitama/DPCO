@@ -1,4 +1,4 @@
-"""CPU smoke checks for the core pipeline, without ImageNet or ResNet training."""
+"""CPU sanity checks for the core pipeline, without ImageNet or ResNet training."""
 
 import argparse
 from pathlib import Path
@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from src.config import load_config
 
 
-def run_smoke(config, steps):
+def run_sanity(config, steps):
     import jax
 
     # This process checks core correctness only, including when run on a TPU VM.
@@ -140,7 +140,7 @@ def run_smoke(config, steps):
     paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT)
     paths.create()
     print(f"Result directories: {paths.logs}, {paths.runs}, {paths.files}")
-    print(f"PASS: CPU core smoke test ({config.method.name}, reference={config.reference.name})")
+    print(f"PASS: CPU core sanity check ({config.method.name}, reference={config.reference.name})")
     print(f"Synthetic fixture: 5 valid examples, 1 padding position, {classes} classes")
     print("No ResNet, ImageNet, TPU-device, throughput, or theorem-convergence validation was performed.")
     print("No log files, checkpoints, training metrics, or analysis CSV files were written.")
@@ -160,8 +160,8 @@ def main():
         config_path = ROOT / config_path
     config = load_config(config_path)
     if config.method.name not in ("sgd", "sage"):
-        parser.error("This smoke test covers full-reference sage and standard sgd only")
-    run_smoke(config, args.steps)
+        parser.error("This sanity check covers full-reference sage and standard sgd only")
+    run_sanity(config, args.steps)
 
 
 if __name__ == "__main__":

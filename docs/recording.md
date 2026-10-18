@@ -1,8 +1,8 @@
 # Experiment recording contract
 
-This implements the agreed classification observation protocol. It does not add an
-ImageNet input pipeline, a ResNet implementation, or TPU host isolation. Use the CPU
-smoke scripts before integrating those adapters. Changes to future observation fields,
+This implements the agreed classification observation protocol. The model, HF input
+and worker0-only nohup TPU adapter are described in tpu_training.md. CPU sanity checks
+are separate from real-device smoke/training. Changes to future observation fields,
 sample dumps, or new tasks must be discussed before implementation.
 
 ## Identity and configuration
@@ -166,7 +166,7 @@ step), seed/key convention, source snapshot (ordering/augmentation RNG and curso
 cumulative sums, best-selection state, last evaluation, elapsed-time offset, and exact
 CSV row cursors. Production source adapters must snapshot all state needed to replay
 their iterator, including shuffle/prefetch behavior; seed/step alone is insufficient.
-This core supports one process; no distributed checkpoint guarantee is implied.
+This core supports one process, including a host-local mesh; no multi-host checkpoint guarantee is implied.
 
 Resume requires the existing run name and matching config. Load only trusted local
 pickle snapshots. CSV rows after the chosen snapshot are removed before continuation,

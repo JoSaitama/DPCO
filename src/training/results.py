@@ -83,3 +83,15 @@ class ExperimentPaths:
                 raise FileExistsError(f"Experiment already exists: {self.name}")
             for path in paths:
                 path.mkdir(parents=True, exist_ok=False)
+
+    def reserve(self):
+        """Reserve a new run before nohup opens its persistent stdout file."""
+        self.create()
+        (self.runs / ".launch_reserved").touch(exist_ok=False)
+
+    def claim_reserved(self):
+        if not all(path.is_dir() for path in (self.logs, self.runs, self.files)):
+            raise FileNotFoundError("Missing launch reservation directories")
+        if (self.logs / "metadata.json").exists():
+            raise FileExistsError("A new launch must not overwrite an existing run")
+        (self.runs / ".launch_reserved").unlink()
