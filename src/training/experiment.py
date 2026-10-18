@@ -18,12 +18,13 @@ from src.training.randomness import training_key
 from src.training.recording import RunRecorder, environment_metadata
 from src.training.results import ResultsPaths, make_run_name
 from src.training.schedules import EventSchedule, milestone_steps
+from src.training.status import RunStatus
 
 
 class ExperimentRunner:
     def __init__(self, config, trainer, source, evaluation, *, base_dir,
                  train_sample_count, metadata, probes=None, console=True,
-                 run_name=None, resume=False, reserved=False):
+                 run_name=None, resume=False, reserved=False, status=None):
         config.validate()
         if train_sample_count <= 0:
             raise ValueError("train_sample_count must be positive")
@@ -49,6 +50,8 @@ class ExperimentRunner:
         else:
             self.paths.create(resume=resume)
         self.store = CheckpointStore(self.paths.runs)
+        status = status or RunStatus(self.paths, config,
+            mode=metadata.get("execution_mode", "sanity"), resume=resume)
         self.recorder = RunRecorder(self.paths, metadata={
             "run_name": self.paths.name, "config": config.as_dict(),
             "environment": environment_metadata(base_dir), "experiment": metadata,
@@ -60,7 +63,7 @@ class ExperimentRunner:
             "state_convention": "step counts completed updates; train metrics describe parameters before that update",
             "accuracy_unit": "fraction", "rng_convention": "seed/step/stream; source owns data RNG",
             "train_timestamp_convention": "host dispatch time; window throughput synchronizes device completion",
-        }, console=console, resume=resume)
+        }, console=console, resume=resume, status=status)
         if resume:
             stored_config = json.loads((self.paths.logs / "metadata.json").read_text())["config"]
             if stored_config != json.loads(json.dumps(config.as_dict())):
@@ -73,6 +76,10 @@ class ExperimentRunner:
             total_steps=config.training.total_steps, train_sample_count=train_sample_count)
 
     def run(self, initial_state, *, resume_slot="latest"):
+        with self.recorder.status.monitor():
+            return self._run(initial_state, resume_slot=resume_slot)
+
+    def _run(self, initial_state, *, resume_slot):
         c, recorder = self.config, self.recorder
         state, samples_seen, elapsed_offset = initial_state, 0, 0.
         cumulative = dict(cumulative_reference_gain=0., cumulative_eta=0., cumulative_eta_sq=0.)

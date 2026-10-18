@@ -63,6 +63,12 @@ unbuffered output and a new session. Both jobs must run sequentially on worker0.
 A host lock rejects overlapping jobs. No CPU/GPU fallback is permitted. A started
 PID alone does not establish success; look for tpu_ready and completed updates.
 
+`results/logs/run_status.tsv` is a shared, append-only status journal across runs/seeds.
+It records launch/resume attempts, startup, progress at the configured logging cadence,
+and completion/failure. Per-run logs remain isolated in their existing directories.
+Train JSON records start with step, event, train_ce and lr; CSV keeps learning_rate.
+See the recording contract for fields and abrupt-termination limitations.
+
 Smoke uses real TPU, real ResNet-50, and a small cached subset of original ImageNet
 images, with three updates by default. It is not a complete dataset/theory benchmark.
 

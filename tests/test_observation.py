@@ -26,6 +26,7 @@ from src.training.experiment import ExperimentRunner
 from src.training.recording import RunRecorder
 from src.training.results import ResultsPaths, make_run_name
 from src.training.schedules import EventSchedule, milestone_steps
+from src.training.status import RunStatus
 from src.training.updates import SGDUpdate
 
 
@@ -185,6 +186,15 @@ class ObservationTests(unittest.TestCase):
             self.assertEqual([int(row["step"]) for row in rows2], [1, 2, 3, 4])
             self.assertEqual(original_metrics, [(row["train_ce"], row["train_top1"]) for row in rows2])
             self.assertEqual(source2.index, 4)
+            with (runner.paths.parent.logs / "run_status.tsv").open(newline="") as handle:
+                status = list(csv.DictReader(handle, delimiter="\t"))
+            attempts = {row["attempt_id"] for row in status}
+            self.assertEqual(len(attempts), 2)
+            for attempt in attempts:
+                rows = [row for row in status if row["attempt_id"] == attempt]
+                self.assertEqual(rows[-1]["status"], "completed")
+                self.assertEqual(rows[-1]["step"], "4")
+            self.assertTrue(any(row["event"] == "resume" and row["step"] == "2" for row in status))
 
     def test_disabled_probes_do_not_execute_or_change_the_training_trajectory(self):
         with TemporaryDirectory() as tmp:
@@ -216,6 +226,28 @@ class ObservationTests(unittest.TestCase):
                 runner.run(state)
             summary = read_rows(runner.paths.files / "summary.csv")
             self.assertEqual(summary[-1]["status"], "failed")
+            with (runner.paths.parent.logs / "run_status.tsv").open(newline="") as handle:
+                status = list(csv.DictReader(handle, delimiter="\t"))
+            self.assertEqual(status[-1]["status"], "failed")
+
+    def test_recording_reuses_the_launcher_attempt_without_duplicate_failure(self):
+        with TemporaryDirectory() as tmp:
+            c = fixture_config(tmp)
+            trainer, source, evaluation, state, _ = fixture_components(c)
+            paths = ResultsPaths.resolve(tmp, base_dir=ROOT).experiment("shared_attempt")
+            status = RunStatus(paths, c, mode="smoke")
+            status.record("launching", pid="")
+            status.record("started")
+            source.batches[0].images[0, 0] = np.nan
+            with self.assertRaises(FloatingPointError), status.monitor():
+                runner = ExperimentRunner(c, trainer, source, evaluation, base_dir=ROOT,
+                    train_sample_count=5, metadata={}, console=False,
+                    run_name=paths.name, status=status)
+                runner.run(state)
+            with status.path.open(newline="") as handle:
+                rows = list(csv.DictReader(handle, delimiter="\t"))
+            self.assertEqual({row["attempt_id"] for row in rows}, {status.attempt_id})
+            self.assertEqual(sum(row["status"] == "failed" for row in rows), 1)
 
     def test_window_buffering_percent_logs_and_final_evaluation_deduplicate(self):
         with TemporaryDirectory() as tmp:

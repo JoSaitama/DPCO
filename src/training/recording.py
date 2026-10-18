@@ -66,6 +66,17 @@ def finite_or_none(value):
     return value if value is None or not isinstance(value, float) or math.isfinite(value) else None
 
 
+def log_payload(event, fields):
+    """Keep readable field order; CSV/config retain the learning_rate name."""
+    payload = {"event": event, **{k: finite_or_none(v) for k, v in fields.items()}}
+    if "learning_rate" in payload:
+        payload["lr"] = payload.pop("learning_rate")
+    order = ("step", "event", "train_ce", "lr", "train_top1", "valid_batch_size",
+             "samples_seen", "epoch_progress", "elapsed_wall_s")
+    return {**{key: payload[key] for key in order if key in payload},
+            **{key: value for key, value in payload.items() if key not in order}}
+
+
 class RunRecorder:
     """Numeric CSV rows are buffered; logs are independently flushed immediately.
 
@@ -73,8 +84,8 @@ class RunRecorder:
     so recording never triggers hidden JAX synchronization per field.
     """
 
-    def __init__(self, paths, *, metadata=None, console=True, resume=False):
-        self.paths, self.console = paths, console
+    def __init__(self, paths, *, metadata=None, console=True, resume=False, status=None):
+        self.paths, self.console, self.status = paths, console, status
         self.buffers = {name: [] for name in SCHEMAS}
         self.row_counts = {name: 0 for name in SCHEMAS}
         if not resume:
@@ -89,12 +100,14 @@ class RunRecorder:
         self.buffers[stream].append(row)
 
     def log(self, event, **fields):
-        payload = {"event": event, **{k: finite_or_none(v) for k, v in fields.items()}}
-        line = json.dumps(payload, sort_keys=True, allow_nan=False)
+        payload = log_payload(event, fields)
+        line = json.dumps(payload, allow_nan=False)
         self.log_file.write(line + "\n")
         self.log_file.flush()
         if self.console:
             print(line, file=sys.stdout, flush=True)
+        if self.status is not None:
+            self.status.record(event, step=fields.get("step"), error=fields.get("error", ""))
 
     def flush(self):
         for stream, rows in self.buffers.items():

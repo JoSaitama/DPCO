@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 from src.training.launch import absolute_path, resolve_config
 from src.training.results import ResultsPaths, make_run_name
 from src.training.runtime import configure_worker0
+from src.training.status import RunStatus
 
 
 def main():
@@ -59,16 +60,25 @@ def main():
         paths.create(resume=True)
     else:
         paths.reserve()
-    with (paths.logs / "stdout.log").open("a", encoding="utf-8") as output:
-        process = subprocess.Popen(command, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
-            stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+    status = RunStatus(paths, config, mode=args.mode, resume=bool(args.resume))
+    command.extend(["--attempt-id", status.attempt_id])
+    with status.monitor():
+        # Publish before spawning, so a fast child cannot finish before its
+        # launch row appears. The child publishes its own actual process ID.
+        status.record("launching", pid="")
+        with (paths.logs / "stdout.log").open("a", encoding="utf-8") as output:
+            process = subprocess.Popen(command, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+    # The child owns status after a successful spawn. A later failure writing
+    # launcher metadata must not mark a live training process as failed.
     # No environment dump: HF tokens and SSH credentials must never be serialized.
     launch = {"pid": process.pid, "hostname": socket.gethostname(), "command": command,
+        "attempt_id": status.attempt_id,
         "runtime_settings": settings, "resume": bool(args.resume), "mode": args.mode}
     (paths.logs / f"launch_{process.pid}.json").write_text(json.dumps(launch, indent=2) + "\n")
     print(f"Started nohup TPU job: pid={process.pid} run={name}")
     print(f"Log: {paths.logs / 'stdout.log'}")
-    print("Startup is not success: check the log for local TPU devices and completed updates.")
+    print("Launched in background; completion is not yet confirmed. Check stdout.log and results/logs/run_status.tsv.")
 
 
 if __name__ == "__main__":

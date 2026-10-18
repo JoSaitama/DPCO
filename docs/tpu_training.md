@@ -82,6 +82,13 @@ successful startup. Check for `tpu_ready`, real model initialization, finite tra
 rows and a `completed` event. Failure/traceback appears in the same stdout.log, even if
 HF access or backend initialization fails before the main recorder is constructed.
 
+The shared append-only `results/logs/run_status.tsv` records launch, bootstrap, loop
+progress and terminal states across seeds. Each resume has a new attempt ID. Inspect
+the latest row per attempt; normal Python bootstrap failures are included even before
+metadata.json exists. Abrupt process/host loss cannot guarantee a terminal entry.
+Step-bearing JSON logs put step/event first; train records then put train_ce/lr.
+See recording.md for exact fields, cadence and failure limitations.
+
 Inspect a command without starting devices, creating run folders or downloading data:
 
 ```bash

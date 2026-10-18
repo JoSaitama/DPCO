@@ -13,9 +13,11 @@ sys.path.insert(0, str(ROOT))
 
 from src.training.launch import absolute_path, resolve_config
 from src.training.runtime import configure_worker0, require_local_tpu
+from src.training.results import ResultsPaths
+from src.training.status import RunStatus
 
 
-def run(args, config, devices):
+def run(args, config, devices, *, status):
     import jax
     import jax.numpy as jnp
     from jax.sharding import NamedSharding, PartitionSpec as P
@@ -105,7 +107,7 @@ def run(args, config, devices):
             "theorem_scope": "reference identities and fixed-target diagnostics, not an automatic convergence-rate proof"}
         runner = ExperimentRunner(config, trainer, source, evaluation, base_dir=ROOT,
             train_sample_count=images.counts["train"], metadata=metadata, probes=probes,
-            run_name=args.run_name, resume=args.resume, reserved=args.reserved)
+            run_name=args.run_name, resume=args.resume, reserved=args.reserved, status=status)
         runner.run(state, resume_slot=args.resume_slot)
     finally:
         images.close()
@@ -121,22 +123,27 @@ def main():
     parser.add_argument("--reserved", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-slot", default="latest")
+    parser.add_argument("--attempt-id")
     args = parser.parse_args()
     config = resolve_config(absolute_path(args.config, ROOT), mode=args.mode,
                             steps=args.steps, batch_size=args.batch_size)
-    settings = configure_worker0(config.execution)
-    # This host lock prevents concurrent SGD/SAGE jobs from claiming the same
-    # chips. It does not start, contact, or place work on worker1.
-    lock_path = Path(tempfile.gettempdir()) / f"sage-tpu-worker0-{os.getuid()}.lock"
-    with lock_path.open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RuntimeError("Another SAGE TPU job is running on this host; run SGD and SAGE sequentially") from None
-        devices = require_local_tpu(config.execution)
-        print(json.dumps({"event": "tpu_ready", "devices": [str(d) for d in devices],
-                          "local_process_only": True, "runtime_settings": settings}), flush=True)
-        run(args, config, devices)
+    paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT).experiment(args.run_name)
+    status = RunStatus(paths, config, mode=args.mode, resume=args.resume, attempt_id=args.attempt_id)
+    with status.monitor():
+        status.record("started")
+        settings = configure_worker0(config.execution)
+        # This host lock prevents concurrent SGD/SAGE jobs from claiming the same
+        # chips. It does not start, contact, or place work on worker1.
+        lock_path = Path(tempfile.gettempdir()) / f"sage-tpu-worker0-{os.getuid()}.lock"
+        with lock_path.open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError("Another SAGE TPU job is running on this host; run SGD and SAGE sequentially") from None
+            devices = require_local_tpu(config.execution)
+            print(json.dumps({"event": "tpu_ready", "devices": [str(d) for d in devices],
+                              "local_process_only": True, "runtime_settings": settings}), flush=True)
+            run(args, config, devices, status=status)
 
 
 if __name__ == "__main__":

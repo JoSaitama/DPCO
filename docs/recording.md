@@ -60,6 +60,43 @@ partial buffer. Crashes can lose an unwritten tail. Terminal and persistent trai
 receive the same structured JSON records, flushed independently. Log frequency does
 not downsample the training CSV. CSV schemas are centralized in recording.py.
 
+Structured JSON preserves field order in both train.log and console/stdout.log.
+Training records start with `step`, `event`, `train_ce`, `lr`, followed by
+`train_top1`, `valid_batch_size`, `samples_seen`, `epoch_progress`, and `elapsed_wall_s`.
+Other fields follow in caller order. All events that carry a step put `step` first
+and `event` second. Missing fields are omitted: validation/start/completion events
+do not invent training loss or learning-rate values. JSON uses the short `lr` alias;
+CSV, configuration and checkpoint schemas continue to use `learning_rate`.
+
+## Cross-run status journal
+
+`results/logs/run_status.tsv` is the one shared index alongside the isolated per-run
+log directories. It is append-only, with one header and a file lock around each write.
+Columns identify timestamp (with timezone), run name, launch/resume attempt ID,
+dataset/data mode/model, method/reference, seed, initial LR, execution mode, resume
+flag, event/status, last recorded step, total update budget, PID/hostname and error.
+SGD/random-flip leave reference blank because neither uses it for its direction.
+
+The launcher writes `launching` before spawning the child. The child writes `started`
+before TPU initialization/data preparation. The loop then writes `start` or `resume`,
+`train` at the configured log frequency, and `completed` or `failed`. Recognized Python
+interruptions are marked `interrupted`. The TSV step is blank until the restored or
+initial loop step is known; bootstrap failures must not claim completed updates.
+Training rows reuse existing host scalars and never add a model pass or device query.
+Rows are flushed immediately; the training CSV retains its independent buffered cadence.
+
+Use the last row per attempt to inspect the latest observed status. A resumed run
+shares its run name but receives a new attempt ID, preserving prior outcomes and
+step rollback without rewriting history. Parent/child share that attempt ID; nested
+failure handlers do not duplicate terminal failure rows. Only launches made after
+this feature is installed appear; old run directories are not backfilled.
+
+This is an event journal, not a background process monitor or seed scheduler. SIGKILL,
+default SIGTERM, host loss, and the hard TPU watchdog exit cannot flush a terminal row;
+the last status can remain running/launching. Confirm process/log state before treating
+such an attempt as live or restarting it. The local file lock is intended for processes
+sharing the host filesystem; it is not a multi-host status service.
+
 ## Schedules
 
 ```toml

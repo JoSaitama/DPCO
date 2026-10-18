@@ -1,5 +1,35 @@
 # Development record
 
+## 2026-10-18: cross-run status journal and JSON field order
+
+- Added results/logs/run_status.tsv as a shared append-only lifecycle/progress index,
+  with run/seed/config identity, per-attempt IDs, timestamps, process identity, last
+  observed step, budget and errors. Parent and child share an ID; resume keeps the
+  original run name but receives a new attempt. File locking protects concurrent
+  writers. No history rewrite or backfill of earlier server smokes is performed.
+- Bootstrap, spawn and loop failures are covered; abrupt kills/host loss/hard watchdog
+  exits remain distinguishable only through their missing terminal event and external
+  process/log checks. Status progress reuses the existing logging cadence and host
+  values without extra forward passes, device synchronization or resource polling.
+- Ordered train JSON as step/event/train_ce/lr, followed by the remaining training
+  fields. Step-bearing non-training events put step/event first and omit unavailable
+  training fields. CSV/config/checkpoint learning_rate names are unchanged. Reworded
+  the launch message to distinguish background startup from confirmed completion.
+- Reviewed performance without changing the gradient backend, warmup, synchronization,
+  metrics or checkpoint policies. elapsed_wall_s is cumulative and includes loop
+  compilation/warmup. The SAGE source requests two VJP pullbacks and one JVP; the JVP
+  requests another evaluation, with possible compiler reuse. SGD uses one ordinary
+  value_and_grad. Additional algorithm work and compile cost are not assumed free.
+- The user's server logs report successful SGD, SAGE-E and SAGE-L TPU smokes. These
+  three-update tests establish pipeline completion, not throughput or theory claims.
+  In the supplied full logs, step 2-to-3 timestamp gaps are about 0.551 s for both
+  SGD and SAGE-E; these dispatch gaps include boundary overhead and are not isolated
+  device timings. Existing timing.csv separates compile_warmup and train_window.
+- Validation: 65 local CPU unit/integration tests passed, including concurrent status
+  appends by three seed processes, bootstrap/spawn failures, shared attempt identity,
+  resume history and console/file JSON ordering. No TPU timing benchmark, commit or
+  push was performed by the assistant in this revision.
+
 ## 2026-10-18: real classification TPU entry and automatic data preparation
 
 - CPU sanity is a foreground interface/recording check. Real smoke, theorem-validation
