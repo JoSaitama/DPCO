@@ -124,6 +124,27 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(resolve_config(custom, mode="train").training.l2_coefficient, .0001)
             self.assertEqual(resolve_config(custom, mode="train", l2_coefficient=0.).training.l2_coefficient, 0.)
 
+    def test_checkpoint_interval_round_trips_from_shell_to_every_child(self):
+        self.assertEqual(self.dry_run()["checkpoint_every_steps"], 100)
+        env = {**os.environ, "SAGE_PYTHON": sys.executable}
+        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
+            "--methods", "sage_e", "sage_l", "sgd", "--seeds", "2", "5",
+            "--checkpoint-every-steps", "10"], cwd=gettempdir(), env=env, text=True)
+        plans = json.loads(output)
+        self.assertEqual(len(plans), 6)
+        for plan in plans:
+            command = plan["command"]
+            self.assertEqual(plan["checkpoint_every_steps"], 10)
+            value = command[command.index("--checkpoint-every-steps") + 1]
+            child = resolve_config(CONFIG, mode="train", checkpoint_every_steps=int(value))
+            self.assertEqual(child.checkpoints.latest_every_steps, 10)
+            self.assertFalse(child.checkpoints.at_epoch_end)
+        with TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "checkpoints.toml"
+            custom.write_text(CONFIG.read_text().replace("latest_every_steps = 100", "latest_every_steps = 37"))
+            self.assertEqual(resolve_config(custom, mode="train").checkpoints.latest_every_steps, 37)
+            self.assertEqual(resolve_config(custom, mode="train", checkpoint_every_steps=10).checkpoints.latest_every_steps, 10)
+
     def test_invalid_grids_are_rejected_before_starting_any_job(self):
         for flags in (("--data-mode", "mismatch10"), ("--seed", "-1"),
                       ("--seeds", "1", "1"), ("--seed", "1", "2", "--resume", "old"),
@@ -131,7 +152,14 @@ class SuiteTests(unittest.TestCase):
                       ("--mode", "validate", "--l2-coefficient", ".0001"),
                       ("--momentum", "1"), ("--nesterov",), ("--lr", "0"),
                       ("--min-lr", ".001"), ("--lr-schedule", "cosine", "--min-lr", "1"),
-                      ("--mode", "validate", "--momentum", ".9")):
+                      ("--mode", "validate", "--momentum", ".9"),
+                      ("--checkpoint-every-steps", "0"), ("--checkpoint-every-steps", "-1"),
+                      ("--checkpoint-every-steps", "2.5"),
+                      ("--eval-every-steps", "2", "--eval-every-epochs", "1"),
+                      ("--eval-every-steps", "0"), ("--eval-every-steps", "-1"),
+                      ("--eval-every-steps", "2.5"), ("--eval-every-epochs", "0"),
+                      ("--eval-every-epochs", "-1"), ("--eval-every-epochs", "nan"),
+                      ("--eval-every-epochs", "inf")):
             with self.subTest(flags=flags):
                 argv = ["launch_tpu.py", "--config", str(CONFIG), *flags]
                 with patch.object(sys, "argv", argv), patch.object(launch_tpu, "launch_job") as launch, \
@@ -139,6 +167,39 @@ class SuiteTests(unittest.TestCase):
                     with self.assertRaises((ValueError, SystemExit)):
                         launch_tpu.main()
                     launch.assert_not_called()
+
+    def test_evaluation_overrides_round_trip_through_shell_and_child(self):
+        default = self.dry_run()
+        self.assertEqual((default["evaluation_mode"], default["evaluation_interval"]), ("epochs", 1.))
+        env = {**os.environ, "SAGE_PYTHON": sys.executable}
+        for flag, value, mode in (("--eval-every-steps", "10", "steps"),
+                                  ("--eval-every-epochs", "0.25", "epochs")):
+            with self.subTest(flag=flag):
+                output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
+                    "--methods", "sage_e", "sage_l", "sgd", "--seeds", "2", "5",
+                    "--checkpoint-every-steps", "17", flag, value], cwd=gettempdir(), env=env, text=True)
+                plans = json.loads(output)
+                self.assertEqual(len(plans), 6)
+                for plan in plans:
+                    self.assertEqual((plan["evaluation_mode"], plan["evaluation_interval"]), (mode, float(value)))
+                    self.assertEqual(plan["checkpoint_every_steps"], 17)
+                    command = plan["command"]
+                    child_value = command[command.index(flag) + 1]
+                    options = ({"eval_every_steps": int(child_value)} if mode == "steps"
+                               else {"eval_every_epochs": float(child_value)})
+                    child = resolve_config(CONFIG, mode="train", checkpoint_every_steps=17, **options)
+                    self.assertEqual((child.evaluation.mode, child.evaluation.interval), (mode, float(value)))
+                    other = "--eval-every-epochs" if mode == "steps" else "--eval-every-steps"
+                    self.assertNotIn(other, command)
+        with TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "evaluation.toml"
+            custom.write_text(CONFIG.read_text().replace('[evaluation]\nmode = "epochs"\ninterval = 1.0',
+                '[evaluation]\nmode = "steps"\ninterval = 37'))
+            self.assertEqual(resolve_config(custom, mode="train").evaluation.interval, 37)
+            changed = resolve_config(custom, mode="train", eval_every_epochs=.5)
+            self.assertEqual((changed.evaluation.mode, changed.evaluation.interval), ("epochs", .5))
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+            resolve_config(CONFIG, mode="train", eval_every_steps=2, eval_every_epochs=1.)
 
     def test_multi_seed_suite_waits_and_stops_at_first_failure(self):
         argv = ["launch_tpu.py", "--config", str(CONFIG), "--seeds", "10", "15", "22"]

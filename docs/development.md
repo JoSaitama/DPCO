@@ -1,5 +1,43 @@
 # Development record
 
+## 2026-10-18: mutually exclusive shell validation cadence controls
+
+- Added --eval-every-steps (positive integer) and --eval-every-epochs (positive
+  finite float) to the common parent/child CLI as a mutually exclusive group.
+  The resolver also rejects simultaneous values. Omission honors the config's
+  evaluation mode/interval; all shipped profiles retain epochs/1.
+- Forwarded cadence through every shell suite job and dry-run plan into the
+  existing evaluation configuration. No new recording fields/streams, automatic
+  subsampling, training updates, best-selection rule or checkpoint policy changes.
+- Preserved initial/final validation and trigger deduplication. Tests exercise
+  shell/child parity and precedence, invalid/conflicting arguments before launch,
+  step/fractional-epoch triggers, full validation counts, parameter/data isolation
+  and exact resume without duplicate evaluation rows.
+- This revision accompanies the still-uncommitted checkpoint interval change.
+  Commit/push remain manual user-only actions. No server job is changed locally.
+- Validation completed: 97 CPU unit/integration tests passed, including both
+  cadence controls, checkpoint failure safety, evaluation isolation/resume, and
+  two-device CPU pipeline checks. Python/shell syntax, English source/docs and
+  whitespace checks passed. No actual TPU job, commit or push was executed.
+
+## 2026-10-18: shell control for periodic recovery checkpoints
+
+- Added --checkpoint-every-steps as a positive-integer override of
+  checkpoints.latest_every_steps. The shell suite, launcher dry-run/config and TPU
+  child all share the same value; omitted CLI values honor the config (default 100).
+- Preserved existing seven-slot retention and save ordering: complete/fsync and
+  atomically publish the snapshot, atomically publish index.json, then remove old
+  unreferenced snapshots. No optimizer, data, probe, metric or log cadence changes.
+- Added tests for shell/child forwarding, config precedence and invalid interval
+  fail-fast behavior, actual latest cadence independent of milestones, publication
+  before cleanup, snapshot/index write failures, and cleanup failure recovery.
+- Resume retains the existing full-configuration equality rule, including the
+  chosen interval. No new per-step recording fields or files are introduced.
+  Commits/pushes remain user-only; no actual server jobs are changed or launched.
+- Validation completed: 93 CPU unit/integration tests passed, including injected
+  checkpoint failure cases and six-job shell-to-child interval forwarding. Python
+  and shell syntax, English source/docs and diff whitespace checks passed.
+
 ## 2026-10-18: optional momentum, cosine scheduling and formal batch 256
 
 - Added zero-default momentum, an independent false-default Nesterov switch, and

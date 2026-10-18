@@ -157,6 +157,18 @@ No candidate validation/probe model state is committed. Best is full validation 
 strict improvement replaces best, ties keep the earlier state. A separately held-out
 test set, if used, must not select best or tune the algorithm.
 
+Use either --eval-every-steps N or --eval-every-epochs F through the shell suite.
+The options are mutually exclusive in both launcher and child parsers, and the
+config resolver also rejects both together. N is a positive integer; F is positive
+and finite and supports fractional sample-progress epochs. Without either override,
+honor the config (default epochs/1). Every suite job receives the selected override;
+dry-run shows evaluation_mode/evaluation_interval. The existing effective config
+stores mode and interval without new metrics, recording fields or streams.
+Checkpoint and log cadence remain independent. At most one periodic evaluation
+runs after an update even when it crosses multiple fractional-epoch thresholds.
+Final and initial evaluation rules remain unchanged; resume requires matching
+evaluation settings and does not replay initial evaluation at the restored state.
+
 Percent logging maps thresholds to actual updates. Tiny budgets cannot produce 100
 distinct model states, and crossed thresholds on the same update produce one record.
 
@@ -220,8 +232,18 @@ failed runs. Future detailed profiler measurements require a separate agreed pro
 
 Seven logical slots: initial, p25, p50, p75, final, best, latest. The first five are fixed
 milestones. Latest uses a configurable step interval and optionally epoch boundaries.
+The shell suite accepts `--checkpoint-every-steps N`, a positive integer overriding
+`[checkpoints] latest_every_steps` (default 100). Parent and TPU child use the same
+effective interval. Latest saves at initial, every N completed updates, and final;
+the optional epoch flag remains a separate config setting. Milestone/best saves do
+not automatically move latest. This interval does not control validation or logging,
+and periodic saves replace the rolling slot rather than accumulating all snapshots.
 `index.json` maps slots to shared step snapshots. Publication is atomic; a temporary
 snapshot can temporarily require additional space. Old unreferenced files are pruned.
+Save ordering is snapshot write/flush/fsync -> atomic snapshot publication -> atomic
+index publication -> cleanup. Failed snapshot writes or index publication preserve
+the previous indexed checkpoint. If cleanup fails after publication, the new index
+and checkpoint remain usable and the obsolete file can remain on disk.
 
 Snapshots contain TrainState (parameters, model buffers, optimizer and method states,
 step), seed/key convention, source snapshot (ordering/augmentation RNG and cursor),
@@ -230,8 +252,9 @@ CSV row cursors. Production source adapters must snapshot all state needed to re
 their iterator, including shuffle/prefetch behavior; seed/step alone is insufficient.
 This core supports one process, including a host-local mesh; no multi-host checkpoint guarantee is implied.
 
-Resume requires the existing run name and matching config. Load only trusted local
-pickle snapshots. CSV rows after the chosen snapshot are removed before continuation,
+Resume requires the existing run name and matching config, including the original
+checkpoint interval. The CLI does not relax the existing configuration equality
+check. Load only trusted local pickle snapshots. CSV rows after the chosen snapshot are removed before continuation,
 preventing duplicated future measurements. Persistent logs remain append-only and mark
 the resume event. Future checkpoint aliases are dropped when resuming an older state.
 The directory is a single-writer run; concurrent processes must not share it.

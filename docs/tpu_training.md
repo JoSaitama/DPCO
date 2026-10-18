@@ -230,6 +230,22 @@ seven-slot retention follow recording.md. --steps and --batch-size are explicit
 overrides saved in the effective run configuration. Probes are off in the supplied
 smoke profiles; the configured global/per-theorem switches remain usable on SAGE.
 
+Pass `--checkpoint-every-steps 10` through `run_sage_suite.sh` to replace the rolling
+latest checkpoint every 10 completed updates. It defaults to 100 (or the custom
+config's latest_every_steps) and accepts positive integers only. Fixed milestones,
+best validation selection and mandatory initial/final saves keep their own rules.
+New snapshots and index are published before obsolete snapshots are deleted; a
+failed snapshot/index write keeps the previous indexed recovery point. This can
+temporarily require space for both snapshots. Reuse the same interval on resume.
+
+Validation cadence is separate: pass --eval-every-steps 1000 or
+--eval-every-epochs 1 through the shell suite, never both. Epoch values can be
+0.25/0.5/etc. and measure cumulative valid-sample progress. The default remains the
+config's epochs/1. Initial and final validation remain mandatory; final/periodic
+overlap runs only once. Validation always traverses the full configured split,
+including only the small prepared validation subset in smoke mode. A checkpoint
+save does not force validation. Keep the same evaluation settings on resume.
+
 To resume a run, reuse its original mode/config/overrides and add:
 
 ```bash

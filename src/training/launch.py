@@ -35,12 +35,22 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--lr-schedule", choices=("constant", "cosine"))
     parser.add_argument("--min-lr", dest="min_learning_rate", type=float,
                         help="Cosine floor, including zero; default 0")
+    parser.add_argument("--checkpoint-every-steps", type=int,
+                        help="Save the rolling latest checkpoint every N completed steps; default 100")
+    evaluation = parser.add_mutually_exclusive_group()
+    evaluation.add_argument("--eval-every-steps", type=int,
+                            help="Run full configured validation every N completed updates")
+    evaluation.add_argument("--eval-every-epochs", type=float,
+                            help="Run full configured validation every N epochs of sample progress; default 1")
 
 
 def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    method=None, dataset=None, model=None, data_mode=None, l2_coefficient=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
-                   min_learning_rate=None):
+                   min_learning_rate=None, checkpoint_every_steps=None,
+                   eval_every_steps=None, eval_every_epochs=None):
+    if eval_every_steps is not None and eval_every_epochs is not None:
+        raise ValueError("eval_every_steps and eval_every_epochs are mutually exclusive")
     config = load_config(path)
     if mode not in ("smoke", "train", "validate"):
         raise ValueError("Unknown execution mode")
@@ -61,6 +71,15 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         ("learning_rate", learning_rate), ("lr_schedule", lr_schedule),
         ("min_learning_rate", min_learning_rate)) if value is not None}
     config = replace(config, training=replace(config.training, **training_overrides))
+    if checkpoint_every_steps is not None:
+        config = replace(config, checkpoints=replace(config.checkpoints,
+            latest_every_steps=checkpoint_every_steps))
+    if eval_every_steps is not None:
+        config = replace(config, evaluation=replace(config.evaluation,
+            mode="steps", interval=eval_every_steps))
+    elif eval_every_epochs is not None:
+        config = replace(config, evaluation=replace(config.evaluation,
+            mode="epochs", interval=eval_every_epochs))
     if config.data.mode != "clean":
         raise ValueError("Only data-mode=clean is implemented; mismatch modes are reserved, not silently simulated")
     if steps is not None:

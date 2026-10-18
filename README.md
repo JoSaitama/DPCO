@@ -114,6 +114,36 @@ to keep the whole queue alive after SSH disconnect. Preview without starting job
 ./run_sage_suite.sh --methods sage_e sage_l sgd --seeds 10 15 --dry-run
 ```
 
+Set `--checkpoint-every-steps 10` (or 100, etc.) to control the rolling latest
+recovery checkpoint. The positive integer overrides `[checkpoints]
+latest_every_steps`; its default is 100 unless a custom config sets another value.
+It is shared by all suite jobs and recorded in each effective configuration.
+This does not retain every periodic snapshot: initial/p25/p50/p75/final/best stay
+protected, and only obsolete unreferenced snapshots are deleted. Initial/final
+saves are mandatory; milestone and best saves remain independent of the interval.
+The order is full snapshot write/flush/fsync, atomic snapshot publication, atomic
+index publication, then deletion of old unreferenced snapshots. A write or index
+publication failure preserves the previous indexed recovery point. Extra transient
+disk space is required while both old and new snapshots exist. Logging and
+validation intervals are independent; this option controls only periodic latest
+saves. Resume currently requires the same original interval in the matching config.
+
+Validation cadence is controlled independently with mutually exclusive options:
+`--eval-every-steps 1000` or `--eval-every-epochs 1` (fractional values such as 0.25
+or 0.5 are supported for epochs). Steps must be positive integers; epochs must be
+positive finite values. Supplying both fails before any job starts. Omission honors
+the config's evaluation mode/interval; the shipped default is every 1 epoch of
+`samples_seen / train_sample_count` progress. These options reach every suite child
+and are saved in the existing effective evaluation configuration. They do not
+change which validation samples are evaluated: each trigger evaluates the full
+configured validation split, which is intentionally a small subset in smoke mode.
+New runs always evaluate at step 0 and all runs evaluate at the final step, even
+when the periodic interval exceeds the budget. Coincident final/periodic triggers
+evaluate only once. Checkpoint or log events do not force extra validation. Best
+is selected only from actual full-validation results, and its selection can change
+with cadence. Resume requires the original evaluation mode/interval and continues
+the schedule from the restored step/sample count without duplicate evaluation rows.
+
 L2 regularization is optional and off by default: `training.l2_coefficient = 0.0`.
 The suite accepts `--l2-coefficient 0.0001` to enable it, or an explicit
 `--l2-coefficient 0` to override a nonzero custom config. The same value applies to
