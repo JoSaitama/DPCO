@@ -188,14 +188,28 @@ python scripts/launch_tpu.py --mode validate --steps 20 --config configs/tpu/ima
 ```
 
 This prepares the complete selected dataset, enables the configured theorem probes,
-and runs real TPU updates. The original probe implementation can materialize gradients
-at sparse audit nodes and is deliberately expensive. Its batches, candidate BN state
+and runs real TPU updates. Runtime probes use compiled whole-batch VJP/JVP plus
+sequential scalar-reduced VJPs for exact sample energy, replacing the original
+vectorized full-Jacobian probe that exhausted HBM on the user's B=256 ResNet-50 run.
+The logical batch, global BatchNorm dependencies and reference remain unchanged;
+neither microbatch reference substitution nor approximate energy is used. Exact
+energy still requires up to B backward evaluations per probe batch and is skipped
+when T3 is disabled. T2 objective evaluations and the fixed audit gradient are JIT
+compiled as well. Floating-point reduction order may differ from the dense oracle.
+The full ResNet-50/B=256 TPU peak must still be measured after the fix; CPU parity
+tests do not establish fit on the server. Its batches, candidate BN state
 and hypothetical updates never replace the real training state. T2 uses the same
 realized training-batch objective and frozen error mask; the T3 fixed audit uses initial
 frozen BN buffers plus fixed training inputs. T3 target-transfer diagnostics are not an
 automatic proof of the original exact-reference convergence theorem. ReLU/BN semantics
 and all additional smoothness/target conditions remain part of interpreting a result.
 The validation mode is for full SAGE; a normal SGD baseline skips extra reference work.
+
+The reported HBM failure occurred during the initial step-0 probe, after complete
+validation but before the initial checkpoint save and first real update. Restart
+that attempt as a new run after updating; do not assume its initial/latest checkpoint
+exists. The already completed dataset cache is reused, and the failed run's logs
+and TSV outcome remain available for diagnosis. No cache/result deletion is required.
 
 Full-data pilot training, normally with probes disabled:
 

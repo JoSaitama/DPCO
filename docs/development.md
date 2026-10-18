@@ -1,5 +1,33 @@
 # Development record
 
+## 2026-10-18: bounded-memory theory probes after step-0 TPU OOM
+
+- Diagnosed the user's real ResNet-50/B=256 failure at the initial probe's jacrev,
+  after 5,000-image validation and before any update or initial checkpoint. The
+  failing HBM allocation requested 6.12G with 4.63G remaining. Final Jacobian size
+  alone had underestimated vectorized reverse-mode intermediate memory.
+- Replaced runtime dense Jacobians with whole-batch compiled VJP/JVP references,
+  scores and paired SGD/SAGE directions. Exact energy pulls back one loss at a
+  time inside a compiled scalar-carry loop, avoiding B simultaneous backward
+  activation trees and [B,P] gradient retention. No microbatching, sample-energy
+  approximation or changes to batch/reference/BatchNorm semantics are introduced.
+- JIT-compiled T2 objective forwards and the fixed audit value/gradient. Skip the
+  energy loop when T3 is off. Sparse nodes, all existing CSV fields, checkpoint
+  policy, optimizer updates and every TOML setting remain unchanged.
+- Added dense-oracle comparisons for all statistics and recorded fields, padding,
+  empty/all/mixed errors, small Flax ResNet/BN, read-only state, a scalar-loop/no-full-
+  Jacobian structural check, and a runtime no-jacrev guard. The two-device CPU
+  test also verifies exact probe energy and global BN against the dense oracle.
+- Sequential exact energy has significant compute cost; no actual TPU memory or
+  throughput result is claimed locally. Retain failed logs and reuse prepared data;
+  this failed pre-checkpoint run must restart as a new run, not an assumed resume.
+  Git commits/pushes remain manual user operations.
+- Validation completed: 102 CPU unit/integration tests passed, including dense
+  numeric oracles, recorded-field parity, real two-device BN/energy checks and
+  the no-runtime-jacrev guard. Python/shell syntax, English source/docs and diff
+  whitespace checks passed. The reported B=256 TPU OOM must still be retested
+  by the user after pulling; no server-memory success is claimed from CPU tests.
+
 ## 2026-10-18: mutually exclusive shell validation cadence controls
 
 - Added --eval-every-steps (positive integer) and --eval-every-epochs (positive

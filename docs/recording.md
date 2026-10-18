@@ -183,6 +183,17 @@ No full per-sample gradient matrices are saved. At probe nodes, compute both
 `Delta = r^T (Gs-Gd)` and `2/B * sum_negative |r^T gi|`, retaining their residual.
 Empty references and zero gains remain recorded, not treated as strict wins.
 
+Runtime probes no longer construct the dense [B,P] Jacobian. Compiled whole-batch
+VJP/JVP computes references, scores and paired directions. Exact sample energy is
+accumulated with a sequential VJP loop carrying only a scalar; every derivative
+still sees the same complete batch and BatchNorm dependencies. The loop runs only
+when T3 is enabled. Compiled T2 objectives and audit gradients preserve their
+existing mask/state definitions. These are memory changes to computation, not new
+recording fields, reduced B, approximate statistics or a change of probe frequency.
+Numerical parity is checked against dense tiny-batch oracles with FP32 tolerances;
+bitwise equality across different reduction orders is not promised. Sequential
+energy remains expensive and its time belongs to the existing probe timing event.
+
 T2 holds inputs, model state, common reference, and the selected current error mask
 fixed. Evaluate hypothetical SGD and SAGE updates at every configured LR scale. These
 updates do not alter real parameters, LR, training source, or training RNG. SAGE-E's

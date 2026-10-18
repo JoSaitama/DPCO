@@ -11,6 +11,8 @@ from src.training import TrainState, Trainer
 from src.training.local_mesh import LocalMeshTrainer, local_mesh
 from src.config import TrainingConfig
 from src.training.updates import make_updater
+from src.references import create_reference
+from src.probes.gradient_statistics import common_reference_statistics
 
 
 def main():
@@ -43,7 +45,19 @@ def main():
                 actual, _ = compiled_step(actual, batch, jax.random.key(step))
                 for a, b in zip(jax.tree_util.tree_leaves(expected), jax.tree_util.tree_leaves(actual)):
                     np.testing.assert_allclose(a, b, rtol=2e-5, atol=2e-6)
-    print("PASS: two-device global BN, reference/error count, JVP scores, momentum/cosine/L2 and weighted updates match full Jacobian")
+    # The failing production probe now uses whole-batch compiled scalar VJPs.
+    # Validate its global BatchNorm and exact sample-energy semantics too.
+    from tests.test_probe_memory import dense_statistics
+    sharded = jax.device_put(initial, distributed.replicated)
+    sharded_batch = jax.device_put(batch, distributed.batch_sharding)
+    for name in ("loss", "error"):
+        reference = create_reference(name)
+        expected = dense_statistics(task, reference, initial.params, batch, initial.model_state, include_energy=True)
+        actual = jax.jit(lambda p, b, s: common_reference_statistics(
+            task, reference, p, b, s, include_energy=True))(sharded.params, sharded_batch, sharded.model_state)
+        for a, b in zip(jax.tree_util.tree_leaves(expected), jax.tree_util.tree_leaves(actual)):
+            np.testing.assert_allclose(a, b, rtol=2e-5, atol=2e-6)
+    print("PASS: two-device global BN, reference/error count, JVP scores, bounded-memory probes, momentum/cosine/L2 and weighted updates match full Jacobian")
 
 
 if __name__ == "__main__":

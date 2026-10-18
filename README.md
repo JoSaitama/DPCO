@@ -257,7 +257,15 @@ Empty error sets fall back to SGD; all-error batches make E/L references identic
 The error-reference denominator is the error count, distinct from the update mean B.
 
 The TPU JVP backend obtains the same full-parameter scores without retaining a [B,P]
-Jacobian. An audit Jacobian remains for small checks and sparse probes. Training BN
+Jacobian. A dense audit Jacobian remains only for tiny offline correctness checks.
+Runtime probes also use compiled whole-batch VJP/JVP for their paired directions.
+Exact per-sample energy uses a scalar-carry loop that pulls back one loss at a time,
+instead of materializing [B,P] gradients or B simultaneous backward activation
+trees. This retains B, global BatchNorm, references and every existing CSV field;
+it is not microbatch training or a stochastic energy estimate. The energy loop
+runs only when T3 is enabled and still requires up to B backward evaluations at
+each probe batch. Probe costs are recorded separately; no TPU fit/time guarantee
+is inferred from the final gradient tensor size alone. Training BN
 uses the same realized logical batch in all derivative passes, with state committed
 once. These per-example loss derivatives can include BN cross-example coupling.
 
