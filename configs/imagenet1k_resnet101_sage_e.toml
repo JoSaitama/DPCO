@@ -1,4 +1,4 @@
-seed = 0
+seed = 42
 global_batch_size = 64
 
 [data]

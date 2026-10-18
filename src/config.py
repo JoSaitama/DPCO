@@ -104,10 +104,12 @@ class RunConfig:
     checkpoints: CheckpointConfig = CheckpointConfig()
     probes: ProbeConfig = ProbeConfig()
     execution: ExecutionConfig = ExecutionConfig()
-    seed: int = 0
+    seed: int = 42
     global_batch_size: int = 64
 
     def validate(self) -> None:
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int) or not 0 <= self.seed < 2**32:
+            raise ValueError("seed must be an integer in [0, 2**32)")
         if self.method.name not in METHODS:
             raise ValueError(f"Unknown method: {self.method.name}")
         if self.reference.name not in REFERENCES:

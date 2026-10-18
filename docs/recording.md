@@ -70,32 +70,46 @@ CSV, configuration and checkpoint schemas continue to use `learning_rate`.
 
 ## Cross-run status journal
 
-`results/logs/run_status.tsv` is the one shared index alongside the isolated per-run
-log directories. It is append-only, with one header and a file lock around each write.
-Columns identify timestamp (with timezone), run name, launch/resume attempt ID,
-dataset/data mode/model, method/reference, seed, initial LR, execution mode, resume
-flag, event/status, last recorded step, total update budget, PID/hostname and error.
-SGD/random-flip leave reference blank because neither uses it for its direction.
+`results/logs/run_status.tsv` is the shared index alongside isolated per-run logs.
+Its exact tab-separated header is:
 
-The launcher writes `launching` before spawning the child. The child writes `started`
-before TPU initialization/data preparation. The loop then writes `start` or `resume`,
-`train` at the configured log frequency, and `completed` or `failed`. Recognized Python
-interruptions are marked `interrupted`. The TSV step is blank until the restored or
-initial loop step is known; bootstrap failures must not claim completed updates.
-Training rows reuse existing host scalars and never add a model pass or device query.
-Rows are flushed immediately; the training CSV retains its independent buffered cadence.
+```text
+timestamp\trun_name\tattempt_id\tdataset\tdata_mode\tmodel\tmethod\treference\tseed\tinitial_lr\tmode\tresume\tevent\tstatus\ttotal_steps\tpid\thostname
+```
 
-Use the last row per attempt to inspect the latest observed status. A resumed run
-shares its run name but receives a new attempt ID, preserving prior outcomes and
-step rollback without rewriting history. Parent/child share that attempt ID; nested
-failure handlers do not duplicate terminal failure rows. Only launches made after
-this feature is installed appear; old run directories are not backfilled.
+Each launch/resume attempt writes only two rows: `event=start, status=running`, then
+`event=end, status=completed` or `event=end, status=failed`. There are no step/error
+columns or progress rows. Detailed errors and step history remain in per-run JSON
+logs and CSV. Method is the internal policy (sage/sgd); reference distinguishes error
+from loss for SAGE and is blank for SGD/random-flip.
 
-This is an event journal, not a background process monitor or seed scheduler. SIGKILL,
-default SIGTERM, host loss, and the hard TPU watchdog exit cannot flush a terminal row;
-the last status can remain running/launching. Confirm process/log state before treating
-such an attempt as live or restarting it. The local file lock is intended for processes
-sharing the host filesystem; it is not a multi-host status service.
+The child writes start before TPU initialization/data preparation, using its PID.
+Completion is deferred until loop flushing and child cleanup succeed. A failed spawn
+has no child PID, so the launcher records its own PID in the failed start/end pair.
+Nested handlers and the waiting parent deduplicate by attempt ID under a stable
+sidecar file lock. Resume keeps the run name and creates a new attempt ID.
+Training/validation logs do not read or write the TSV; JSON and CSV keep their existing
+cadence, fields and buffering. No extra model calculation or device polling is added.
+
+No backup, migration or automatic cleanup is performed. After older smoke jobs finish,
+the user removes their obsolete TSV/results before starting the new version. If an
+existing TSV has an incompatible header, startup fails with a cleanup instruction;
+its bytes remain unchanged. A missing/empty TSV receives the current header. Older
+run directories are not scanned or backfilled.
+
+The obsolete outer `.tools/smoke_sage_e_3seeds.py` helper is not part of the repository
+and is no longer needed once its jobs finish. Temporary seed/reference configs may
+also be removed after use. Keep the new repository `scripts/run_suite.py`, which the
+shell entry uses. Do not delete the whole `.tools` directory blindly: it may also hold
+uv/uvx installed for environment management. They are not used by the training launcher,
+but may still be useful for rebuilding the project environment. Dataset caches and the
+active `.venv` are separate and must not be treated as obsolete suite helpers.
+
+The shell suite waits for actual child exit, then verifies completion before starting
+the next job. If a child is killed or exits without a terminal record, the live waiting
+launcher records failure and writes its exit code in stdout.log. Losing both launcher
+and child or the whole host can still leave a start-only attempt. This is a host-local
+file index, not a multi-host liveness service.
 
 ## Schedules
 

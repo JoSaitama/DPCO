@@ -75,19 +75,40 @@ before launching SAGE-E on the same host:
 python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_sage_e.toml
 ```
 
-Do not add an outer nohup: the launcher already executes `nohup python -u ...`, with
+For a single direct Python launch, no outer nohup is needed: it executes `nohup python -u ...`, with
 stdin detached, a new session, and persistent per-run stdout/stderr. A host lock rejects
 overlapping jobs rather than killing an existing job. PID creation does not prove
 successful startup. Check for `tpu_ready`, real model initialization, finite training
 rows and a `completed` event. Failure/traceback appears in the same stdout.log, even if
 HF access or backend initialization fails before the main recorder is constructed.
 
-The shared append-only `results/logs/run_status.tsv` records launch, bootstrap, loop
-progress and terminal states across seeds. Each resume has a new attempt ID. Inspect
-the latest row per attempt; normal Python bootstrap failures are included even before
-metadata.json exists. Abrupt process/host loss cannot guarantee a terminal entry.
+The shared `results/logs/run_status.tsv` records only start and end per attempt,
+with running/completed/failed status and no step/error columns. Each resume has a new
+attempt ID. Normal bootstrap failures are covered even before metadata.json exists.
 Step-bearing JSON logs put step/event first; train records then put train_ce/lr.
-See recording.md for exact fields, cadence and failure limitations.
+See recording.md for exact columns, schema checks and failure limitations.
+
+For all new training suites, use the root shell entry under an outer nohup:
+
+```bash
+nohup ./run_sage_suite.sh \
+  --mode smoke --dataset imagenet100 --model resnet50 \
+  --methods sage_e sage_l sgd --seeds 10 15 22 --data-mode clean \
+  >/dev/null 2>&1 < /dev/null &
+```
+
+This example creates nine sequential three-update smoke runs. Each successful run adds
+two status rows. The wrapper defaults to train mode; pass smoke explicitly for tests.
+It shares the same isolated TPU child entry, waits for process exit/TPU lock release,
+checks terminal status and stops on the first failure. The waiting parent finalizes
+an abrupt child failure even if the child could not write its own end row. Host loss
+can still prevent terminal recording. No worker1 job is started.
+
+Seeds default to 42 in shipped configs and may be overridden with --seed/--seeds.
+Methods are sage_e/sage_l/sgd; dataset/model overrides update both the parent and child
+config, including the classifier class count. Only clean data is currently supported;
+mismatch modes fail before launch. Use --dry-run to inspect the full grid, and set the
+formal training budget explicitly rather than treating the 100-step pilot as final.
 
 Inspect a command without starting devices, creating run folders or downloading data:
 

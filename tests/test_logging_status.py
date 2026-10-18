@@ -55,29 +55,29 @@ class LoggingStatusTests(unittest.TestCase):
             config = load_config(CONFIG)
             paths = ResultsPaths.resolve(tmp, base_dir=ROOT).experiment("history")
             parent = RunStatus(paths, config, mode="smoke")
-            parent.record("launching", pid="")
             child = RunStatus(paths, config, mode="smoke", attempt_id=parent.attempt_id)
             with child.monitor():
                 child.record("started")
-                child.record("start", step=0)
-                child.record("train", step=3)
-                child.record("completed", step=3)
+                child.record("start")
+                child.record("train")
+                child.record("completed")
             resumed = RunStatus(paths, config, mode="smoke", resume=True)
             with self.assertRaisesRegex(RuntimeError, "fixture failure"):
                 with resumed.monitor(), resumed.monitor():
                     resumed.record("started")
                     raise RuntimeError("fixture failure\nsecond line\tcolumn")
             rows = read_status(parent.path)
-            self.assertEqual(len(rows), 7)
-            self.assertEqual({row["attempt_id"] for row in rows[:5]}, {parent.attempt_id})
+            self.assertEqual(len(rows), 4)
+            self.assertEqual([row["event"] for row in rows], ["start", "end", "start", "end"])
+            self.assertEqual({row["attempt_id"] for row in rows[:2]}, {parent.attempt_id})
             self.assertNotEqual(parent.attempt_id, resumed.attempt_id)
-            self.assertEqual(rows[4]["status"], "completed")
+            self.assertEqual(rows[1]["status"], "completed")
             self.assertEqual(rows[-1]["status"], "failed")
-            self.assertEqual(rows[-1]["step"], "")
+            self.assertNotIn("step", rows[-1])
             self.assertEqual(rows[-1]["resume"], "True")
             self.assertEqual(rows[-1]["reference"], "")
-            self.assertIn("fixture failure second line column", rows[-1]["error"])
-            self.assertEqual(len(parent.path.read_text().splitlines()), 8)
+            self.assertNotIn("error", rows[-1])
+            self.assertEqual(len(parent.path.read_text().splitlines()), 5)
 
     def test_independent_seed_processes_append_one_header_without_lost_rows(self):
         script = """
@@ -92,8 +92,8 @@ paths = ResultsPaths.resolve(sys.argv[2], base_dir=Path.cwd()).experiment('seed'
 status = RunStatus(paths, config, mode='smoke')
 status.record('started')
 for step in range(10):
-    status.record('train', step=step)
-status.record('completed', step=10)
+    status.record('train')
+status.record('completed')
 """
         with TemporaryDirectory() as tmp:
             processes = [subprocess.Popen([sys.executable, "-c", script, str(CONFIG), tmp, str(seed)],
@@ -103,13 +103,13 @@ status.record('completed', step=10)
                 self.assertEqual(process.returncode, 0, output + error)
             path = Path(tmp) / "logs/run_status.tsv"
             rows = read_status(path)
-            self.assertEqual(len(rows), 36)
+            self.assertEqual(len(rows), 6)
             self.assertEqual(list(rows[0]), list(STATUS_FIELDS))
             for seed in range(3):
                 selected = [row for row in rows if row["seed"] == str(seed)]
-                self.assertEqual(len(selected), 12)
+                self.assertEqual(len(selected), 2)
                 self.assertEqual(selected[-1]["status"], "completed")
-                self.assertEqual(selected[-1]["step"], "10")
+                self.assertEqual([row["event"] for row in selected], ["start", "end"])
 
     def test_child_records_failures_before_the_main_recorder_exists(self):
         from scripts import train_classification
@@ -128,9 +128,9 @@ status.record('completed', step=10)
                         redirect_stdout(StringIO()), self.assertRaisesRegex(RuntimeError, "fixture"):
                     train_classification.main()
                 rows = read_status(Path(tmp) / "logs/run_status.tsv")
-                self.assertEqual([row["event"] for row in rows], ["started", "failed"])
+                self.assertEqual([row["event"] for row in rows], ["start", "end"])
                 self.assertEqual(rows[-1]["attempt_id"], "fixture")
-                self.assertIn("fixture " + stage, rows[-1]["error"])
+                self.assertEqual(rows[-1]["status"], "failed")
                 self.assertFalse((Path(tmp) / "logs/bootstrap/metadata.json").exists())
 
     def test_launcher_records_spawn_failure_without_starting_accelerators(self):
@@ -146,6 +146,62 @@ status.record('completed', step=10)
                     self.assertRaisesRegex(OSError, "fixture spawn"):
                 launch_tpu.main()
             rows = read_status(Path(tmp) / "logs/run_status.tsv")
-            self.assertEqual([row["event"] for row in rows], ["launching", "failed"])
+            self.assertEqual([row["event"] for row in rows], ["start", "end"])
             self.assertEqual(rows[0]["attempt_id"], rows[-1]["attempt_id"])
-            self.assertEqual(rows[0]["pid"], "")
+            self.assertEqual(rows[-1]["status"], "failed")
+
+            logs = list((Path(tmp) / "logs").glob("*/stdout.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertIn("fixture spawn", logs[0].read_text())
+
+    def test_success_waits_for_cleanup_and_cleanup_failure_has_only_two_rows(self):
+        with TemporaryDirectory() as tmp:
+            status = RunStatus(ResultsPaths.resolve(tmp, base_dir=ROOT).experiment("cleanup"),
+                               load_config(CONFIG), mode="smoke")
+            with self.assertRaisesRegex(RuntimeError, "cleanup"), status.monitor():
+                status.record("started")
+                with status.monitor():
+                    status.record("completed")
+                self.assertIsNone(status.outcome())
+                raise RuntimeError("cleanup failure")
+            rows = read_status(status.path)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[-1]["status"], "failed")
+
+    def test_parent_can_finalize_dead_child_without_duplicating_its_start(self):
+        with TemporaryDirectory() as tmp:
+            paths = ResultsPaths.resolve(tmp, base_dir=ROOT).experiment("killed")
+            config = load_config(CONFIG)
+            child = RunStatus(paths, config, mode="smoke")
+            child.record("started", pid=12345)
+            parent = RunStatus(paths, config, mode="smoke", attempt_id=child.attempt_id)
+            parent.record("failed", pid=12345)
+            parent.record("failed", pid=12345)
+            rows = read_status(child.path)
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(all(row["pid"] == "12345" for row in rows))
+            self.assertEqual(parent.outcome(), "failed")
+
+    def test_incompatible_status_schema_is_rejected_without_backup_or_rewrite(self):
+        with TemporaryDirectory() as tmp:
+            paths = ResultsPaths.resolve(tmp, base_dir=ROOT).experiment("new")
+            paths.parent.create()
+            path = paths.parent.logs / "run_status.tsv"
+            with path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=(*STATUS_FIELDS, "step", "error"), delimiter="\t")
+                writer.writeheader()
+                writer.writerow(dict(attempt_id="old", run_name="old", seed=0,
+                                     event="train", step=3, status="running", error="old detail"))
+            original = path.read_bytes()
+            status = RunStatus(paths, load_config(CONFIG), mode="smoke")
+            with self.assertRaisesRegex(ValueError, "Remove the old smoke-test TSV"):
+                status.record("started")
+            self.assertEqual(path.read_bytes(), original)
+            self.assertFalse(list(path.parent.glob("run_status.legacy-*.tsv")))
+            path.unlink()
+            status.record("started")
+            status.record("completed")
+            rows = read_status(path)
+            self.assertEqual(list(rows[0]), list(STATUS_FIELDS))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual([r["event"] for r in rows], ["start", "end"])

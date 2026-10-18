@@ -107,7 +107,7 @@ class RunRecorder:
         if self.console:
             print(line, file=sys.stdout, flush=True)
         if self.status is not None:
-            self.status.record(event, step=fields.get("step"), error=fields.get("error", ""))
+            self.status.record(event)
 
     def flush(self):
         for stream, rows in self.buffers.items():

@@ -1,5 +1,39 @@
 # Development record
 
+## 2026-10-18: compact lifecycle TSV and parameterized shell suites
+
+- Replaced progress status events with exactly start/end per launch/resume attempt.
+  Removed step/error columns; completed/failed are the terminal outcomes. Step and
+  error detail remain in existing JSON/CSV. Child success is deferred until cleanup.
+  Stable sidecar locking deduplicates parent/child writes and preserves two rows when
+  the waiting coordinator finalizes a killed child. No per-step TSV file access occurs.
+- No old-schema backup or migration is performed. The user will remove old smoke
+  artifacts after their jobs finish. Incompatible TSV headers are rejected without
+  rewriting data; a missing/empty TSV is initialized with the current header.
+- Added --seed/--seeds and --method/--methods list aliases, dataset/model/data-mode
+  overrides, parent/child config parity, preflight validation of the complete grid,
+  seed-major serial execution, true child-exit waiting and failure-stop behavior.
+  The default seed and all shipped presets now use 42; explicit custom config seeds
+  remain effective when CLI seeds are omitted. Resume requires one matching job.
+- Added executable run_sage_suite.sh and a small Python suite entry. It defaults
+  to train mode with the existing ImageNet-100/ResNet-50/SAGE-E pilot, supports a smoke
+  override and runs under outer nohup. SAGE_PYTHON can override the project interpreter.
+  Mismatch modes are reserved and rejected before launch rather than relabeled clean.
+  Each actual run receives its own launch-time timestamp and unchanged per-run outputs.
+- Added tests for incompatible-schema rejection, two-row deduplication, cleanup failure, abrupt
+  detached-child exit, seed aliases/defaults, method/dataset/model round trips, shell
+  argument forwarding from another cwd, sequential execution and fail-fast behavior.
+  Gradient calculations, learning-rate values, training metrics and checkpoint policies
+  are unchanged. Git commits and pushes remain manual user-only operations.
+- Validation: 74 CPU unit/integration tests passed, including actual detached stdlib
+  child success/abrupt exit without TPU access. All 10 seed-42 presets, exact TSV
+  header, shell syntax/executable flag, Python syntax, English content and whitespace
+  checks passed. No actual server training, commit or push was performed locally.
+- The generic suite name leaves room for future data modes; only clean is implemented
+  today. The old untracked three-seed helper may be removed when its queue finishes.
+  Environment tooling in outer .tools is separate from that helper and should be
+  inspected before deletion. The new repository scripts/run_suite.py remains required.
+
 ## 2026-10-18: cross-run status journal and JSON field order
 
 - Added results/logs/run_status.tsv as a shared append-only lifecycle/progress index,

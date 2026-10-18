@@ -58,19 +58,65 @@ After SGD completes successfully, launch SAGE-E:
 
     python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_sage_e.toml
 
-Do not add an outer nohup: the wrapper already invokes nohup with detached input,
+For these single direct Python launches, no outer nohup is needed: the launcher uses detached input,
 unbuffered output and a new session. Both jobs must run sequentially on worker0.
 A host lock rejects overlapping jobs. No CPU/GPU fallback is permitted. A started
 PID alone does not establish success; look for tpu_ready and completed updates.
 
 `results/logs/run_status.tsv` is a shared, append-only status journal across runs/seeds.
-It records launch/resume attempts, startup, progress at the configured logging cadence,
-and completion/failure. Per-run logs remain isolated in their existing directories.
+Each attempt writes only start/running and end/completed-or-failed. It has no step/error
+columns or progress rows. Detailed errors and steps stay in the isolated per-run logs.
 Train JSON records start with step, event, train_ce and lr; CSV keeps learning_rate.
 See the recording contract for fields and abrupt-termination limitations.
 
 Smoke uses real TPU, real ResNet-50, and a small cached subset of original ImageNet
 images, with three updates by default. It is not a complete dataset/theory benchmark.
+
+## Shell suites and seed overrides
+
+Use the executable root script for training suites. It defaults to train mode,
+ImageNet-100, ResNet-50, SAGE-E, clean data and seed 42, using the TPU pilot config.
+The Python interpreter defaults to outer Project_SAGE/.venv/bin/python; set SAGE_PYTHON
+to another project-specific interpreter path if needed. The script works from any cwd.
+
+Example: three sequential SAGE-E TPU smokes, with three updates each:
+
+```bash
+nohup ./run_sage_suite.sh \
+  --mode smoke --dataset imagenet100 --model resnet50 \
+  --methods sage_e --seeds 10 15 22 --data-mode clean \
+  >/dev/null 2>&1 < /dev/null &
+```
+
+`--seed` and `--seeds` are aliases and accept one or more integers, for example
+`--seed 42` or `--seeds 10 15 22 46`. All shipped presets and the config default use
+42. Explicit CLI seeds override the config; an explicit seed in a custom config is
+honored when the CLI omits seeds. To resume an older seed-0 run, pass `--seed 0` and
+retain all its original settings. Resume permits just one seed/method.
+
+`--methods sage_e sage_l sgd` runs each method for each listed seed, in seed-major
+order. The method labels select sage/error, sage/loss, or unmodified SGD. Select
+`--dataset imagenet100|imagenet1k`, `--model resnet50|resnet101`, and `--data-mode clean`
+(`--datamode` is an alias). Mismatch modes are reserved and rejected before any job
+starts; a directory label never silently simulates noisy data. All grid configurations
+are validated before execution. Runs remain worker0-only and serial; failure stops
+the remaining suite. The coordinator waits for child exit and successful status,
+not just successful process creation. Individual jobs still use the nohup TPU launcher.
+
+For formal training, use `--mode train` and configure `--steps`/the config budget;
+the default 100-step pilot is not a tuned final training recipe. Optional `--batch-size`
+overrides the logical batch. The wrapper always waits, so use the outer nohup above
+to keep the whole queue alive after SSH disconnect. Preview without starting jobs:
+
+```bash
+./run_sage_suite.sh --methods sage_e sage_l sgd --seeds 10 15 --dry-run
+```
+
+The lower-level launch_tpu.py also accepts these overrides; multiple jobs always wait
+serially. A single direct launch remains detached unless `--wait` is specified.
+The earlier untracked three-seed helper is obsolete and can be removed after its queue
+finishes. Remove the old smoke-test TSV before updating; no backup, migration or
+automatic result deletion is performed. Incompatible TSV headers are rejected.
 
 ## Data and model provisioning
 

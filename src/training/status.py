@@ -1,4 +1,4 @@
-"""Append-only, cross-run status journal; no accelerator imports or polling."""
+"""Two lifecycle rows per attempt; no training metrics or accelerator imports."""
 
 from contextlib import contextmanager
 import csv
@@ -12,20 +12,18 @@ from uuid import uuid4
 STATUS_FIELDS = (
     "timestamp", "run_name", "attempt_id", "dataset", "data_mode", "model",
     "method", "reference", "seed", "initial_lr", "mode", "resume",
-    "event", "status", "step", "total_steps", "pid", "hostname", "error",
+    "event", "status", "total_steps", "pid", "hostname",
 )
-EVENT_STATUS = {
-    "launching": "launching", "started": "running", "start": "running",
-    "resume": "running", "train": "running", "completed": "completed",
-    "failed": "failed", "interrupted": "interrupted",
-}
+START_EVENTS = ("started", "start", "resume")
+END_EVENTS = ("completed", "failed", "interrupted")
 
 
 class RunStatus:
-    """Each launch/resume has one attempt ID shared by parent and child.
+    """Write start/running and end/completed-or-failed once per attempt.
 
-    The last row for an attempt is its latest observed status, not a liveness
-    guarantee. SIGKILL, host loss, and os._exit cannot publish a terminal row.
+    A stable sidecar lock covers schema checks and cross-process deduplication. Child
+    cleanup remains inside monitor(), so success is published only after cleanup.
+    A waiting launcher can finalize a killed child; host loss cannot guarantee an end.
     """
 
     def __init__(self, paths, config, *, mode, resume=False, attempt_id=None):
@@ -39,46 +37,93 @@ class RunStatus:
             seed=config.seed, initial_lr=config.training.learning_rate,
             mode=mode, resume=resume, total_steps=config.training.total_steps,
         )
-        self.last_step = None
         self.terminal = None
+        self._depth = 0
+        self._pending_success = False
 
     @property
     def attempt_id(self):
         return self.identity["attempt_id"]
 
-    def record(self, event, *, step=None, error="", pid=None):
-        if event not in EVENT_STATUS:
-            return
-        if step is not None:
-            self.last_step = int(step)
-        row = dict(self.identity, timestamp=datetime.now().astimezone().isoformat(),
-            event=event, status=EVENT_STATUS[event], step=self.last_step,
-            pid=os.getpid() if pid is None else pid, hostname=socket.gethostname(),
-            error=str(error).replace("\t", " ").replace("\r", " ").replace("\n", " "))
+    @contextmanager
+    def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Lock the shared append stream so concurrent seed jobs cannot interleave
-        # rows or race to write multiple headers. No read/rewrite of old rows.
-        with self.path.open("a+", newline="", encoding="utf-8") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+        with self.path.with_suffix(".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
             try:
-                handle.seek(0, os.SEEK_END)
+                self._check_schema()
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def _read(self):
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return []
+        with self.path.open(newline="", encoding="utf-8") as handle:
+            return list(csv.DictReader(handle, delimiter="\t"))
+
+    def _check_schema(self):
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return
+        with self.path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle, delimiter="\t")
+            if tuple(reader.fieldnames or ()) != STATUS_FIELDS:
+                raise ValueError(f"Incompatible status TSV schema: {self.path}. "
+                                 "Remove the old smoke-test TSV before relaunching; no backup or migration is performed.")
+
+    def _append(self, event, status, *, pid=None):
+        with self._locked():
+            history = [row for row in self._read() if row["attempt_id"] == self.attempt_id]
+            ended = next((row for row in history if row["event"] == "end"), None)
+            if ended is not None:
+                self.terminal = ended["status"]
+                return
+            if event == "start" and history:
+                return
+            base = dict(self.identity, timestamp=datetime.now().astimezone().isoformat(),
+                        pid=os.getpid() if pid is None else pid, hostname=socket.gethostname())
+            rows = []
+            if not history:
+                rows.append(dict(base, event="start", status="running"))
+            if event == "end":
+                rows.append(dict(base, event="end", status=status))
+            new = not self.path.exists() or self.path.stat().st_size == 0
+            with self.path.open("a", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=STATUS_FIELDS,
                                         delimiter="\t", lineterminator="\n")
-                if handle.tell() == 0:
+                if new:
                     writer.writeheader()
-                writer.writerow(row)
+                writer.writerows(rows)
                 handle.flush()
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
-        self.terminal = event if event in ("completed", "failed", "interrupted") else None
+            if event == "end":
+                self.terminal = status
+
+    def record(self, event, *, pid=None):
+        if event in START_EVENTS:
+            self._append("start", "running", pid=pid)
+        elif event in END_EVENTS:
+            if event == "completed" and self._depth:
+                self._pending_success = True
+            else:
+                self._append("end", "completed" if event == "completed" else "failed", pid=pid)
+        # Train/validation events deliberately have no TSV path or file access.
+
+    def outcome(self):
+        with self._locked():
+            ended = [row for row in self._read()
+                     if row["attempt_id"] == self.attempt_id and row["event"] == "end"]
+        return ended[-1]["status"] if ended else None
 
     @contextmanager
     def monitor(self):
-        """Include bootstrap failures and avoid duplicate nested failure rows."""
+        self._depth += 1
         try:
             yield self
-        except BaseException as error:
-            if self.terminal not in ("failed", "interrupted"):
-                event = "failed" if isinstance(error, Exception) else "interrupted"
-                self.record(event, error=f"{type(error).__name__}: {error}")
+        except BaseException:
+            self.record("failed")
             raise
+        else:
+            if self._depth == 1 and self._pending_success:
+                self._append("end", "completed")
+        finally:
+            self._depth -= 1

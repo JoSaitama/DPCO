@@ -1,5 +1,5 @@
 # Worker0-only TPU pilot. Smoke overrides the budget to 3 updates and limits data.
-seed = 0
+seed = 42
 global_batch_size = 8
 
 [data]

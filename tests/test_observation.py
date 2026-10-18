@@ -95,7 +95,7 @@ class ObservationTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             config = fixture_config(tmp)
             name = make_run_name(config, timestamp=datetime(2026, 10, 17, 14, 30, 25, tzinfo=timezone.utc))
-            self.assertEqual(name, "imagenet100_clean_resnet50_sage_e_0_0.01_20261017_143025")
+            self.assertEqual(name, "imagenet100_clean_resnet50_sage_e_42_0.01_20261017_143025")
             paths = ResultsPaths.resolve(tmp, base_dir=ROOT).experiment(name)
             paths.create()
             with self.assertRaises(FileExistsError):
@@ -193,8 +193,9 @@ class ObservationTests(unittest.TestCase):
             for attempt in attempts:
                 rows = [row for row in status if row["attempt_id"] == attempt]
                 self.assertEqual(rows[-1]["status"], "completed")
-                self.assertEqual(rows[-1]["step"], "4")
-            self.assertTrue(any(row["event"] == "resume" and row["step"] == "2" for row in status))
+                self.assertEqual([row["event"] for row in rows], ["start", "end"])
+            self.assertEqual(len(status), 4)
+            self.assertTrue(any(row["event"] == "start" and row["resume"] == "True" for row in status))
 
     def test_disabled_probes_do_not_execute_or_change_the_training_trajectory(self):
         with TemporaryDirectory() as tmp:
@@ -236,7 +237,6 @@ class ObservationTests(unittest.TestCase):
             trainer, source, evaluation, state, _ = fixture_components(c)
             paths = ResultsPaths.resolve(tmp, base_dir=ROOT).experiment("shared_attempt")
             status = RunStatus(paths, c, mode="smoke")
-            status.record("launching", pid="")
             status.record("started")
             source.batches[0].images[0, 0] = np.nan
             with self.assertRaises(FloatingPointError), status.monitor():

@@ -11,7 +11,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.training.launch import absolute_path, resolve_config
+from src.training.launch import absolute_path, add_overrides, resolve_config
 from src.training.runtime import configure_worker0, require_local_tpu
 from src.training.results import ResultsPaths
 from src.training.status import RunStatus
@@ -124,9 +124,12 @@ def main():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-slot", default="latest")
     parser.add_argument("--attempt-id")
+    add_overrides(parser)
     args = parser.parse_args()
     config = resolve_config(absolute_path(args.config, ROOT), mode=args.mode,
-                            steps=args.steps, batch_size=args.batch_size)
+                            steps=args.steps, batch_size=args.batch_size, seed=args.seed,
+                            method=args.method, dataset=args.dataset, model=args.model,
+                            data_mode=args.data_mode)
     paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT).experiment(args.run_name)
     status = RunStatus(paths, config, mode=args.mode, resume=args.resume, attempt_id=args.attempt_id)
     with status.monitor():
