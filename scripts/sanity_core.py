@@ -27,7 +27,7 @@ def run_sanity(config, steps):
     from src.tasks.classification import ClassificationTask
     from src.training import TrainState, Trainer
     from src.training.results import ResultsPaths
-    from src.training.updates import SGDUpdate
+    from src.training.updates import make_updater
 
     def model_fn(params, images, state):
         return images @ params["w"] + params["b"], state
@@ -124,13 +124,23 @@ def run_sanity(config, steps):
     print("PASS: empty-error SGD fallback, all-error E/L equivalence, and zero-score retention")
 
     method = create_method(config.method.name, reference_name=config.reference.name)
-    trainer = Trainer(task, method, SGDUpdate(config.training.learning_rate))
+    updater = make_updater(config.training)
+    trainer = Trainer(task, method, updater)
     compiled_step = jax.jit(trainer.step)
-    state = TrainState(params)
+    state = TrainState(params, optimizer_state=updater.init(params))
+    velocity = {name: np.zeros_like(value) for name, value in params.items()}
     for step in range(steps):
         direction = expected_direction(state.params, batch, config.method.name, config.reference.name)
-        expected_params = {name: np.asarray(value) - config.training.learning_rate * direction[name]
-                           for name, value in state.params.items()}
+        direction = {name: direction[name] + (
+            config.training.l2_coefficient * np.asarray(value) if value.ndim > 1 else 0.)
+            for name, value in state.params.items()}
+        if config.training.momentum != 0:
+            velocity = {name: config.training.momentum * velocity[name] + direction[name] for name in direction}
+            direction = ({name: direction[name] + config.training.momentum * velocity[name] for name in direction}
+                         if config.training.nesterov else velocity)
+        rate = updater.learning_rate
+        eta = rate(step) if callable(rate) else rate
+        expected_params = {name: np.asarray(value) - eta * direction[name] for name, value in state.params.items()}
         state, _ = compiled_step(state, batch)
         assert_direction(state.params, expected_params)
         if int(state.step) != step + 1:

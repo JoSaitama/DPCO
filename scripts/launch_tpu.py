@@ -33,9 +33,14 @@ def plan_job(args, path, config, method):
                "--seed", str(config.seed)]
     for flag, value in (("--steps", args.steps), ("--batch-size", args.batch_size),
                         ("--method", method), ("--dataset", args.dataset),
-                        ("--model", args.model), ("--data-mode", args.data_mode)):
+                        ("--model", args.model), ("--data-mode", args.data_mode),
+                        ("--l2-coefficient", args.l2_coefficient), ("--momentum", args.momentum),
+                        ("--lr", args.learning_rate), ("--lr-schedule", args.lr_schedule),
+                        ("--min-lr", args.min_learning_rate)):
         if value is not None:
             command.extend([flag, str(value)])
+    if args.nesterov is not None:
+        command.append("--nesterov" if args.nesterov else "--no-nesterov")
     if args.resume:
         command.extend(["--resume", "--resume-slot", args.resume_slot])
     return paths, command
@@ -114,7 +119,10 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
     for seed in seeds:
         for method in methods:
             config = resolve_config(path, mode=args.mode, steps=args.steps, batch_size=args.batch_size,
-                seed=seed, method=method, dataset=args.dataset, model=args.model, data_mode=args.data_mode)
+                seed=seed, method=method, dataset=args.dataset, model=args.model, data_mode=args.data_mode,
+                l2_coefficient=args.l2_coefficient, momentum=args.momentum, nesterov=args.nesterov,
+                learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
+                min_learning_rate=args.min_learning_rate)
             jobs.append((config, method))
     wait = args.wait or len(jobs) > 1
     if args.dry_run:
@@ -124,7 +132,11 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             "seed": config.seed, "method": config.method.name, "reference": config.reference.name,
             "dataset": config.data.name, "num_classes": config.data.num_classes,
             "model": config.model.name, "data_mode": config.data.mode,
-            "batch_size": config.global_batch_size} for config, paths, command in previews]
+            "batch_size": config.global_batch_size,
+            "l2_coefficient": config.training.l2_coefficient,
+            "momentum": config.training.momentum, "nesterov": config.training.nesterov,
+            "learning_rate": config.training.learning_rate, "lr_schedule": config.training.lr_schedule,
+            "min_learning_rate": config.training.min_learning_rate} for config, paths, command in previews]
         print(json.dumps(plans[0] if len(plans) == 1 else plans, indent=2))
         return
     for config, method in jobs:

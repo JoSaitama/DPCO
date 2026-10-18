@@ -76,6 +76,8 @@ images, with three updates by default. It is not a complete dataset/theory bench
 
 Use the executable root script for training suites. It defaults to train mode,
 ImageNet-100, ResNet-50, SAGE-E, clean data and seed 42, using the TPU pilot config.
+The global batch defaults to 256 for train/validate and 8 for smoke. An explicit
+`--batch-size` overrides either mode; all four local TPU devices share this batch.
 The Python interpreter defaults to outer Project_SAGE/.venv/bin/python; set SAGE_PYTHON
 to another project-specific interpreter path if needed. The script works from any cwd.
 
@@ -111,6 +113,66 @@ to keep the whole queue alive after SSH disconnect. Preview without starting job
 ```bash
 ./run_sage_suite.sh --methods sage_e sage_l sgd --seeds 10 15 --dry-run
 ```
+
+L2 regularization is optional and off by default: `training.l2_coefficient = 0.0`.
+The suite accepts `--l2-coefficient 0.0001` to enable it, or an explicit
+`--l2-coefficient 0` to override a nonzero custom config. The same value applies to
+all methods/seeds in that suite and is saved in each run's full configuration.
+When zero, the updater follows the original computation: no L2 gradient, parameter
+norm reduction, extra optimizer state, or device synchronization is added. This
+does not promise identical measured wall time, which varies between runs.
+When enabled, coupled L2 adds `lambda * parameter` only for leaves with `ndim > 1`,
+after sample weighting/aggregation. References, scores, unsigned CE and accuracy are
+unchanged at the same model state; subsequent training trajectories can differ.
+Biases and BatchNorm scale/offset are excluded. This is not decoupled AdamW decay.
+Current theorem probes require L2=0 and momentum=0 and reject nonzero values before launch, since
+their objectives and hypothetical updates exclude regularization. Resume requires
+the original coefficient; older runs without this field are treated as L2=0 without
+rewriting their metadata. No benefit to validation accuracy is assumed in advance.
+
+Optimizer and schedule options are shared by every method in a shell suite:
+
+| Shell option | Config field under `[training]` | Default |
+| --- | --- | --- |
+| `--lr` / `--learning-rate` | `learning_rate` | 0.01 (untuned pilot) |
+| `--momentum` | `momentum` | 0 (off) |
+| `--nesterov` / `--no-nesterov` | `nesterov` | false |
+| `--lr-schedule constant\|cosine` | `lr_schedule` | constant |
+| `--min-lr` | `min_learning_rate` | 0 |
+| `--l2-coefficient` | `l2_coefficient` | 0 (off) |
+
+Momentum uses `v_next = momentum * v + g`, without EMA normalization/dampening.
+Here `g` is the method's completed direction plus optional coupled L2. Plain
+momentum updates with `v_next`; Nesterov updates with `g + momentum * v_next`.
+Only a nonzero momentum allocates its velocity tree. Checkpoints preserve that
+tree from the initial snapshot onward; warmup does not consume momentum history.
+Nesterov requires nonzero momentum and is never implicitly enabled by momentum.
+
+`--lr` is the actual constant rate or cosine peak, with no automatic batch-size
+scaling. Cosine has no implicit warmup. For T>=2 updates indexed 0..T-1, it uses
+`min_lr + (peak_lr-min_lr)*(1+cos(pi*step/(T-1)))/2`. Thus the first update uses the
+peak and the last uses the floor, including zero. A one-update run uses the peak;
+queries after the budget return the floor. A zero-rate final update leaves finite
+parameters unchanged but still processes the batch and commits model/optimizer
+state. At zero-rate probe nodes, T2 division-by-rate fields are blank and strict
+gain eligibility is false; zero is never used as a denominator. A nonzero minimum
+in constant mode is rejected rather than silently ignored.
+
+Preview a configured suite without launching or downloading:
+
+```bash
+./run_sage_suite.sh --methods sage_e sage_l sgd --seeds 2 5 7 \
+  --batch-size 256 --momentum 0.9 --lr 0.1 \
+  --lr-schedule cosine --min-lr 0 --l2-coefficient 0 --dry-run
+```
+
+These values illustrate the interface, not a tuned accuracy recipe. Actual suites
+still launch with outer nohup. For original theorem validation, retain zero momentum
+and L2; a nonconstant rate does not turn the probes into a momentum theorem. Resume
+requires the same rate/schedule/floor/momentum/Nesterov/batch/budget settings. Older
+metadata missing the new optimizer fields implies off/constant defaults without
+rewriting files; explicitly retain the old batch (for example `--batch-size 8` or
+64) when resuming an old run whose preset batch has since changed to 256.
 
 The lower-level launch_tpu.py also accepts these overrides; multiple jobs always wait
 serially. A single direct launch remains detached unless `--wait` is specified.

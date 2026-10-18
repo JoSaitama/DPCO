@@ -68,6 +68,17 @@ and `event` second. Missing fields are omitted: validation/start/completion even
 do not invent training loss or learning-rate values. JSON uses the short `lr` alias;
 CSV, configuration and checkpoint schemas continue to use `learning_rate`.
 
+With cosine scheduling, each training row stores the rate used for that update,
+not the peak. Steps 1..T in CSV correspond to schedule indices 0..T-1. The peak,
+floor, schedule name and momentum/Nesterov/L2 settings live in the existing full
+configuration. No new per-step recording streams or fields are introduced.
+Momentum velocity is part of TrainState.optimizer_state and is checkpointed and
+restored exactly; resume continues the LR schedule from the restored step.
+Current theorem probes require zero L2 and momentum. If a cosine probe node has
+zero LR, T2 difference_over_lr and first_order_residual are blank (undefined),
+not zero or NaN, and strict_gain_eligible is false. Other probe fields retain their
+definitions. A zero-rate update may still change BatchNorm and momentum state.
+
 ## Cross-run status journal
 
 `results/logs/run_status.tsv` is the shared index alongside isolated per-run logs.

@@ -34,7 +34,7 @@ def run(args, config, devices, *, status):
     from src.training.experiment import ExperimentRunner
     from src.training.local_mesh import LocalMeshTrainer, local_mesh
     from src.training.metrics import task_metrics
-    from src.training.updates import SGDUpdate
+    from src.training.updates import make_updater
 
     batch_size, image_size = config.global_batch_size, config.data.image_size
     if batch_size % len(devices):
@@ -59,12 +59,14 @@ def run(args, config, devices, *, status):
         print(json.dumps({"event": "model_initialize", "model": config.model.name,
                           "initialization": "random", "precision": config.model.precision}), flush=True)
         params, model_state = initialize(model, config.seed, image_size)
-        state = jax.device_put(TrainState(params, model_state), replicated)
+        updater = make_updater(config.training)
+        state = jax.device_put(TrainState(params, model_state,
+            optimizer_state=updater.init(params)), replicated)
         train_task = ClassificationTask(model_adapter(model, train=True), config.data.num_classes)
         eval_task = ClassificationTask(model_adapter(model, train=False), config.data.num_classes)
         method = create_method(config.method.name, reference_name=config.reference.name,
             flip_probability=config.method.flip_probability, gradient_backend="jvp")
-        trainer = LocalMeshTrainer(train_task, method, SGDUpdate(config.training.learning_rate), mesh)
+        trainer = LocalMeshTrainer(train_task, method, updater, mesh)
         source = ImageBatchSource(images, batch_size, image_size, config.seed)
         batch_metrics = jax.jit(lambda p, b, s: task_metrics(eval_task.evaluate(p, b, s), include_top5=True),
             in_shardings=(replicated, trainer.batch_sharding, replicated), out_shardings=replicated)
@@ -98,7 +100,7 @@ def run(args, config, devices, *, status):
             "normalization": "ImageNet mean/std; train random resized crop and horizontal flip; eval resize/center crop",
             "train_tail": "drop_last_to_exclude_padding_from_training_batchnorm",
             "evaluation_tail": "padded_with_valid_count_weighting",
-            "optimizer": "vanilla SGD; no momentum, weight decay, clipping or norm matching",
+            "optimizer": "SGD update with configured optional momentum/Nesterov, coupled L2 and constant/cosine LR; no decoupled weight decay, clipping or norm matching",
             "model": config.model.name, "model_initialization": "random",
             "model_source_revision": "81b168d62f151feca9e8e7abc591df80168395b4",
             "parameter_count": sum(leaf.size for leaf in jax.tree_util.tree_leaves(params)),
@@ -129,7 +131,10 @@ def main():
     config = resolve_config(absolute_path(args.config, ROOT), mode=args.mode,
                             steps=args.steps, batch_size=args.batch_size, seed=args.seed,
                             method=args.method, dataset=args.dataset, model=args.model,
-                            data_mode=args.data_mode)
+                            data_mode=args.data_mode, l2_coefficient=args.l2_coefficient,
+                            momentum=args.momentum, nesterov=args.nesterov,
+                            learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
+                            min_learning_rate=args.min_learning_rate)
     paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT).experiment(args.run_name)
     status = RunStatus(paths, config, mode=args.mode, resume=args.resume, attempt_id=args.attempt_id)
     with status.monitor():

@@ -18,6 +18,7 @@ class ConfigTests(unittest.TestCase):
                 config = load_config(path)
                 self.assertIn(config.data.num_classes, (100, 1000))
                 self.assertEqual(config.results.root_dir, "results")
+                self.assertEqual(config.global_batch_size, 256)
 
     def test_sage_e_presets_match_sgd_comparison_settings(self):
         for path in sorted((ROOT / "configs").glob("*_sage_e.toml")):

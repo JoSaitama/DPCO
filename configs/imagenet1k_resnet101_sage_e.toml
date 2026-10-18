@@ -1,5 +1,5 @@
 seed = 42
-global_batch_size = 64
+global_batch_size = 256
 
 [data]
 name = "imagenet1k"

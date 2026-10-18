@@ -27,7 +27,7 @@ from src.training.recording import RunRecorder
 from src.training.results import ResultsPaths, make_run_name
 from src.training.schedules import EventSchedule, milestone_steps
 from src.training.status import RunStatus
-from src.training.updates import SGDUpdate
+from src.training.updates import SGDUpdate, make_updater
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,7 +79,7 @@ def fixture_components(config):
     source = FixedSource()
     evaluation = EvaluationSpec(task, lambda: iter(source.batches), 5, "deterministic_linear")
     trainer = Trainer(task, create_method(config.method.name, reference_name=config.reference.name),
-                      SGDUpdate(config.training.learning_rate))
+                      make_updater(config.training))
     probe_batch = classification_batch(*source.batches[0])
     def fixed_audit(p):
         return jnp.mean(task.evaluate(p, probe_batch).losses)

@@ -1,5 +1,6 @@
 """Dependency-light configuration resolution shared by nohup parent and child."""
 
+import argparse
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,10 +25,22 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--model", choices=("resnet50", "resnet101"))
     parser.add_argument("--data-mode", "--datamode", dest="data_mode",
                         help="Only clean is implemented; mismatch modes are reserved")
+    parser.add_argument("--l2-coefficient", type=float,
+                        help="Coupled L2 on matrix/kernel weights after sample aggregation; default 0 (off)")
+    parser.add_argument("--momentum", type=float, help="Momentum coefficient in [0, 1); default 0 (off)")
+    parser.add_argument("--nesterov", action=argparse.BooleanOptionalAction, default=None,
+                        help="Use Nesterov momentum; requires --momentum > 0")
+    parser.add_argument("--lr", "--learning-rate", dest="learning_rate", type=float,
+                        help="Constant learning rate or cosine peak; not automatically scaled by batch size")
+    parser.add_argument("--lr-schedule", choices=("constant", "cosine"))
+    parser.add_argument("--min-lr", dest="min_learning_rate", type=float,
+                        help="Cosine floor, including zero; default 0")
 
 
 def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
-                   method=None, dataset=None, model=None, data_mode=None):
+                   method=None, dataset=None, model=None, data_mode=None, l2_coefficient=None,
+                   momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
+                   min_learning_rate=None):
     config = load_config(path)
     if mode not in ("smoke", "train", "validate"):
         raise ValueError("Unknown execution mode")
@@ -43,6 +56,11 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         config = replace(config, model=replace(config.model, name=model))
     if data_mode is not None:
         config = replace(config, data=replace(config.data, mode=data_mode))
+    training_overrides = {name: value for name, value in (
+        ("l2_coefficient", l2_coefficient), ("momentum", momentum), ("nesterov", nesterov),
+        ("learning_rate", learning_rate), ("lr_schedule", lr_schedule),
+        ("min_learning_rate", min_learning_rate)) if value is not None}
+    config = replace(config, training=replace(config.training, **training_overrides))
     if config.data.mode != "clean":
         raise ValueError("Only data-mode=clean is implemented; mismatch modes are reserved, not silently simulated")
     if steps is not None:
@@ -55,6 +73,9 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
         config = replace(config, global_batch_size=batch_size)
+    elif mode == "smoke":
+        # Keep a smoke lightweight; use --batch-size to test a larger batch.
+        config = replace(config, global_batch_size=8)
     if mode == "smoke":
         config = replace(config, logging=replace(config.logging, mode="steps", interval=1))
     if mode == "validate":

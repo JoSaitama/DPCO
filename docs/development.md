@@ -1,5 +1,62 @@
 # Development record
 
+## 2026-10-18: optional momentum, cosine scheduling and formal batch 256
+
+- Added zero-default momentum, an independent false-default Nesterov switch, and
+  constant-default LR scheduling with an optional cosine floor. Suite options
+  --momentum, --nesterov/--no-nesterov, --lr/--learning-rate, --lr-schedule and
+  --min-lr reach each child, dry-run plan and effective configuration. No implicit
+  warmup, LR scaling with batch, dampening or EMA normalization is introduced.
+- Plain momentum accumulates beta*v+g; Nesterov uses g+beta*v_next. Optional coupled
+  L2 is added to the method direction first. Zero momentum allocates no velocity;
+  disabled L2/momentum with constant LR retains the original update JAXPR.
+- Cosine uses update indices 0..T-1: peak at the first, floor at the last (T>=2).
+  One-update runs use peak once; later schedule queries return floor. Existing LR
+  columns record the applied step rate. Zero-rate probe ratios are blank/undefined
+  and are not marked eligible for strict gain; no new metric fields are added.
+- RunConfig and all 10 presets now default to global B=256 for train/validate.
+  Smoke mode explicitly defaults to B=8, preserving the lightweight server check.
+  --batch-size overrides either mode. The 100-step budget and 0.01 LR stay untuned.
+- Momentum state is initialized before the initial checkpoint and warmup, saved
+  with TrainState and restored without reset. Resume validates all update settings;
+  missing legacy fields imply off/constant defaults without metadata rewriting.
+  Older runs also need their original batch explicitly retained after preset changes.
+- Existing theorem probes require zero momentum and L2; cosine remains supported.
+  Mainline SAGE reference/flip construction, batch-mean normalization, data selection,
+  device isolation, result paths, status TSV and checkpoint retention are unchanged.
+- Verification includes independent multistep momentum/Nesterov/L2 recurrence,
+  cosine endpoints and host/JIT agreement, suite option parity and fail-fast checks,
+  exact resumed parameters/velocity/LR, legacy resume, and two-CPU global-batch
+  audit-vs-JVP parity with the combined optimizer options. Commits/pushes remain
+  user-only; no remote or actual TPU training is executed in this local revision.
+- Validation completed: 87 CPU unit/integration tests passed, including the actual
+  two-device CPU mesh check. Combined momentum/Nesterov/cosine-to-zero/L2 passed
+  both CPU sanity scripts; English source/docs, Python/shell syntax and diff
+  whitespace checks passed. Batch-256 TPU memory/throughput is not measured locally.
+
+## 2026-10-18: opt-in coupled L2 with an unchanged disabled update
+
+- Added training.l2_coefficient, default 0, and --l2-coefficient forwarding from
+  run_sage_suite.sh through the coordinator to each TPU child. A CLI zero overrides
+  a nonzero custom config; invalid/nonfinite/negative values fail before any job.
+- A static Python branch excludes all regularization operations when the coefficient
+  is zero. Enabled L2 adds lambda times parameter after sample aggregation only for
+  leaves with ndim > 1, preserving reference construction, sign selection, raw CE
+  and accuracy definitions. No new recording streams or metrics were added.
+- Existing theorem probes reject nonzero L2 rather than reporting unregularized
+  certificates for a regularized update. Legacy resume metadata missing the field
+  compares as zero without any rewrite; a changed coefficient still fails resume.
+- Momentum, cosine scheduling and default batch-size changes remain separate pending
+  work. This change does not activate them or alter existing preset batches/budgets.
+- Verification covers disabled JAXPR identity and exact numerical parity, enabled
+  kernel-only updates, unchanged same-state SGD/SAGE metrics, shell/child forwarding,
+  config validation and checkpoint resume. No local TPU timing or accuracy claim,
+  Git commit or push is made.
+- Validation completed: 80 CPU unit/integration tests passed. The L2-specific tests
+  passed again after review, and opt-in L2 passed both CPU core and recording sanity
+  scripts. Python/shell syntax, English source/docs and git diff whitespace checks
+  passed. No TPU smoke or formal training was launched locally.
+
 ## 2026-10-18: compact lifecycle TSV and parameterized shell suites
 
 - Replaced progress status events with exactly start/end per launch/resume attempt.

@@ -12,6 +12,7 @@ import time
 import jax
 import numpy as np
 
+from src.config import TrainingConfig
 from src.methods.base import AlignmentMethod
 from src.training.checkpoints import CheckpointStore
 from src.training.randomness import training_key
@@ -66,6 +67,10 @@ class ExperimentRunner:
         }, console=console, resume=resume, status=status)
         if resume:
             stored_config = json.loads((self.paths.logs / "metadata.json").read_text())["config"]
+            # Older checkpoints predate optional update controls and used the off path.
+            # Compare its implicit default without rewriting original metadata.
+            for key in ("l2_coefficient", "momentum", "nesterov", "lr_schedule", "min_learning_rate"):
+                stored_config["training"].setdefault(key, getattr(TrainingConfig(), key))
             if stored_config != json.loads(json.dumps(config.as_dict())):
                 self.recorder.close()
                 raise ValueError("Resume configuration differs from the original run")
@@ -87,11 +92,17 @@ class ExperimentRunner:
         if self.resume:
             saved = self.store.load(resume_slot)
             state, samples_seen = saved["train_state"], saved["samples_seen"]
+            if state.optimizer_state is None and getattr(self.trainer.updater, "momentum", 0) != 0:
+                raise ValueError("Momentum checkpoint is missing optimizer state")
             self.source.restore(saved["source_state"])
             cumulative, best, best_step = saved["cumulative"], saved["best"], saved["best_step"]
             last_eval, elapsed_offset = saved["last_eval"], saved["elapsed_wall_s"]
             recorder.rewind(saved["csv_cursors"])
             self.store.discard_future(int(state.step))
+        initializer = getattr(self.trainer.updater, "init", None)
+        if state.optimizer_state is None and callable(initializer):
+            # Establish a stable state tree before warmup and the initial save.
+            state = state._replace(optimizer_state=initializer(state.params))
         start = time.perf_counter()
         elapsed = lambda: elapsed_offset + time.perf_counter() - start
         step = int(state.step)

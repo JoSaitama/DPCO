@@ -31,7 +31,7 @@ def exercise(output_root, config_path, enable_probes):
     from src.training import TrainState, Trainer
     from src.training.evaluation import EvaluationSpec
     from src.training.experiment import ExperimentRunner
-    from src.training.updates import SGDUpdate
+    from src.training.updates import make_updater
 
     config = load_config(config_path)
     config = replace(config, results=ResultsConfig(str(output_root)),
@@ -65,7 +65,7 @@ def exercise(output_root, config_path, enable_probes):
         "b": jnp.full(classes, -30.).at[:2].set(0.)})
     trainer = Trainer(task, create_method(config.method.name, reference_name=config.reference.name,
                                          flip_probability=config.method.flip_probability),
-                      SGDUpdate(config.training.learning_rate))
+                      make_updater(config.training))
     evaluation = EvaluationSpec(task, lambda: iter([source.batch]), 3, "deterministic_linear")
     def audit(p):
         return jnp.mean(task.evaluate(p, source.batch).losses)

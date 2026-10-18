@@ -90,16 +90,19 @@ class ClassificationProbes:
                         ps = jax.tree_util.tree_map(lambda p, s: p - eta * s, params, gs)
                         jd, js = objective(pd), objective(ps)
                         difference = js - jd
+                        # Cosine may reach zero. A zero-step comparison is valid,
+                        # but division by its step size has no defined value.
+                        ratio = difference / eta if eta > 0 else None
                         rows.append(("theorem2", {**base, "objective": objective_name,
                             "objective_mode": self.objective_mode, "batch_id": item.identity,
                             "reference_name": self.reference_name, "selected_count": selected_count,
                             "learning_rate": learning_rate, "lr_scale": scale, "probe_lr": eta,
                             "j_initial": initial, "j_sgd": jd, "j_sage": js,
-                            "difference": difference, "difference_over_lr": difference / eta,
-                            "delta": objective_delta, "first_order_residual": difference / eta + objective_delta,
+                            "difference": difference, "difference_over_lr": ratio,
+                            "delta": objective_delta, "first_order_residual": ratio + objective_delta if eta > 0 else None,
                             "norm_sgd_sq": d2, "norm_sage_sq": s2,
                             "finite": jnp.all(jnp.isfinite(jnp.array([initial, jd, js, objective_delta]))),
-                            "strict_gain_eligible": objective_delta > 0}))
+                            "strict_gain_eligible": (objective_delta > 0) & (eta > 0)}))
             if config.theorem3:
                 target_gain = tree_dot(audit_gradient, correction)
                 energy = sum(jnp.sum(jnp.where(valid.reshape((valid.shape[0],) + (1,) * (leaf.ndim - 1)), leaf ** 2, 0.))

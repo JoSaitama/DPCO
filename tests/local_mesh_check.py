@@ -9,7 +9,8 @@ from src.methods import create_method
 from src.tasks.classification import ClassificationTask
 from src.training import TrainState, Trainer
 from src.training.local_mesh import LocalMeshTrainer, local_mesh
-from src.training.updates import SGDUpdate
+from src.config import TrainingConfig
+from src.training.updates import make_updater
 
 
 def main():
@@ -26,15 +27,23 @@ def main():
     batch = classification_batch(np.array([[5., -2.], [1., 4.], [-2., 1.], [-4., -3.]], np.float32),
                                  np.array([0, 1, 0, 0], np.int32))
     for method_name, reference in (("sgd", "loss"), ("sage", "error"), ("sage", "loss")):
-        audit = create_method(method_name, reference_name=reference, gradient_backend="audit")
-        expected, _ = jax.jit(Trainer(task, audit, SGDUpdate(.1)).step)(initial, batch, jax.random.key(0))
-        method = create_method(method_name, reference_name=reference, gradient_backend="jvp")
-        distributed = LocalMeshTrainer(task, method, SGDUpdate(.1), local_mesh(jax.local_devices()))
-        state = jax.device_put(initial, distributed.replicated)
-        actual, _ = distributed.compile_step()(state, batch, jax.random.key(0))
-        for a, b in zip(jax.tree_util.tree_leaves(expected), jax.tree_util.tree_leaves(actual)):
-            np.testing.assert_allclose(a, b, rtol=2e-5, atol=2e-6)
-    print("PASS: two-device global BN, reference/error count, JVP scores and weighted update match full Jacobian")
+        for training in (TrainingConfig(learning_rate=.1),
+                         TrainingConfig(learning_rate=.1, total_steps=3, momentum=.9, nesterov=True,
+                                        l2_coefficient=.0001, lr_schedule="cosine", min_learning_rate=.001)):
+            updater = make_updater(training)
+            audit = create_method(method_name, reference_name=reference, gradient_backend="audit")
+            reference_step = jax.jit(Trainer(task, audit, updater).step)
+            method = create_method(method_name, reference_name=reference, gradient_backend="jvp")
+            distributed = LocalMeshTrainer(task, method, updater, local_mesh(jax.local_devices()))
+            expected = initial._replace(optimizer_state=updater.init(initial.params))
+            actual = jax.device_put(expected, distributed.replicated)
+            compiled_step = distributed.compile_step()
+            for step in range(3):
+                expected, _ = reference_step(expected, batch, jax.random.key(step))
+                actual, _ = compiled_step(actual, batch, jax.random.key(step))
+                for a, b in zip(jax.tree_util.tree_leaves(expected), jax.tree_util.tree_leaves(actual)):
+                    np.testing.assert_allclose(a, b, rtol=2e-5, atol=2e-6)
+    print("PASS: two-device global BN, reference/error count, JVP scores, momentum/cosine/L2 and weighted updates match full Jacobian")
 
 
 if __name__ == "__main__":

@@ -160,7 +160,9 @@ a stalled runtime instead of waiting indefinitely for another worker. Environmen
 settings are a requested topology, not a substitute for verifying real libtpu behavior.
 
 Batch size must be divisible by the number of local JAX TPU devices; device count is
-not always chip count. The initial global batch is 8. Model precision is explicitly
+not always chip count. Train/validate default to global B=256 (64 per local device
+on the four-device host); smoke defaults to B=8. --batch-size overrides either.
+Model precision is explicitly
 float32 in the pilot; bfloat16 can be configured later and must be reported separately.
 No claim of measured TPU throughput, peak memory or worker isolation is made until
 the server run confirms those properties. The code never falls back to GPU/CPU.
@@ -203,8 +205,27 @@ python scripts/launch_tpu.py --mode train --config configs/tpu/imagenet100_resne
 ```
 
 Run these sequentially. The preset 100-step budget and LR=0.01 remain untuned pilot
-values, not a final accuracy recipe. Updates are vanilla SGD: no unreported momentum,
-weight decay, clipping or norm matching. Logging/evaluation/checkpoint controls and
+values, not a final accuracy recipe. Updates use SGD with optional momentum and
+coupled L2, both off by default. No decoupled weight decay, clipping or norm matching
+is added. Pass --momentum 0.9 to use plain momentum; --nesterov is separate and
+requires a positive momentum. Its velocity is initialized once and saved/restored
+with the training state. Both methods use the same configured update policy.
+Pass --lr 0.1 --lr-schedule cosine --min-lr 0 to decay from peak to zero, or replace
+zero with a positive floor. Constant is the default schedule; no implicit warmup
+or batch-size LR scaling occurs. With T>=2, update 0 uses peak and update T-1 uses
+floor. One-update runs use peak once; queries after the budget use floor.
+Pass `--l2-coefficient 0.0001` through `run_sage_suite.sh` to enable it for all suite
+jobs, or `--l2-coefficient 0` to force it off. Config files can use
+`[training] l2_coefficient = 0.0` (put the key inside the existing training table).
+Only parameter leaves with ndim > 1 receive lambda times parameter, after sample
+aggregation. It never changes which gradients are flipped at the same state. Zero
+uses the original compiled update operations; no regularization metrics are computed.
+Current theorem probes require zero L2 and momentum; incompatible options fail
+preflight. At zero LR, T2 division-by-LR fields are blank and strict gain eligibility
+is false. Resume uses all original optimizer/schedule/budget/batch settings; absent
+legacy optimizer fields imply off/constant defaults, without rewriting metadata.
+Preserve an older run's batch explicitly if its preset has since changed to 256.
+Logging/evaluation/checkpoint controls and
 seven-slot retention follow recording.md. --steps and --batch-size are explicit
 overrides saved in the effective run configuration. Probes are off in the supplied
 smoke profiles; the configured global/per-theorem switches remain usable on SAGE.

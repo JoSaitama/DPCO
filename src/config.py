@@ -44,6 +44,11 @@ class ReferenceConfig:
 class TrainingConfig:
     learning_rate: float = 0.01
     total_steps: int = 100
+    l2_coefficient: float = 0.0
+    momentum: float = 0.0
+    nesterov: bool = False
+    lr_schedule: str = "constant"
+    min_learning_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -105,7 +110,7 @@ class RunConfig:
     probes: ProbeConfig = ProbeConfig()
     execution: ExecutionConfig = ExecutionConfig()
     seed: int = 42
-    global_batch_size: int = 64
+    global_batch_size: int = 256
 
     def validate(self) -> None:
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or not 0 <= self.seed < 2**32:
@@ -145,10 +150,34 @@ class RunConfig:
         chips = self.execution.visible_chips.split(",")
         if len(set(chips)) != len(chips) or math.prod(int(part) for part in dimensions) != len(chips):
             raise ValueError("Visible TPU chips must be unique and match the chip-bounds product")
-        if self.global_batch_size <= 0 or self.data.image_size <= 0:
-            raise ValueError("Batch size and image size must be positive")
+        if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
+               for value in (self.global_batch_size, self.data.image_size)):
+            raise ValueError("Batch size and image size must be positive integers")
         if not math.isfinite(self.training.learning_rate) or self.training.learning_rate <= 0:
             raise ValueError("learning_rate must be positive and finite")
+        if (isinstance(self.training.l2_coefficient, bool)
+                or not math.isfinite(self.training.l2_coefficient)
+                or self.training.l2_coefficient < 0):
+            raise ValueError("l2_coefficient must be nonnegative and finite")
+        if self.probes.enabled and self.training.l2_coefficient != 0:
+            raise ValueError("Current theorem probes require l2_coefficient=0; their objectives exclude regularization")
+        if (isinstance(self.training.momentum, bool) or not math.isfinite(self.training.momentum)
+                or not 0 <= self.training.momentum < 1):
+            raise ValueError("momentum must be finite and in [0, 1)")
+        if not isinstance(self.training.nesterov, bool):
+            raise ValueError("nesterov must be a boolean")
+        if self.training.nesterov and self.training.momentum == 0:
+            raise ValueError("nesterov requires nonzero momentum")
+        if self.probes.enabled and self.training.momentum != 0:
+            raise ValueError("Current theorem probes require momentum=0; their updates exclude momentum")
+        if self.training.lr_schedule not in ("constant", "cosine"):
+            raise ValueError("lr_schedule must be constant or cosine")
+        if (isinstance(self.training.min_learning_rate, bool)
+                or not math.isfinite(self.training.min_learning_rate)
+                or not 0 <= self.training.min_learning_rate <= self.training.learning_rate):
+            raise ValueError("min_learning_rate must be finite and in [0, learning_rate]")
+        if self.training.lr_schedule == "constant" and self.training.min_learning_rate != 0:
+            raise ValueError("min_learning_rate requires lr_schedule=cosine")
         if not isinstance(self.results.root_dir, str) or not self.results.root_dir.strip():
             raise ValueError("results.root_dir must be a nonempty path")
         from src.training.schedules import validate_interval

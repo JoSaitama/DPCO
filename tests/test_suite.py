@@ -67,10 +67,71 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(plan["mode"], "train")
         self.assertEqual(plan["seed"], 42)
         self.assertTrue(plan["wait"])
+        self.assertEqual(plan["batch_size"], 256)
+        self.assertEqual(plan["momentum"], 0.)
+        self.assertEqual(plan["lr_schedule"], "constant")
+        self.assertEqual(self.dry_run()["batch_size"], 8)
+        self.assertEqual(self.dry_run("--batch-size", "128")["batch_size"], 128)
+
+    def test_optimizer_options_round_trip_from_shell_to_child_and_config(self):
+        env = {**os.environ, "SAGE_PYTHON": sys.executable}
+        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
+            "--methods", "sage_e", "sage_l", "sgd", "--seeds", "2", "5",
+            "--momentum", ".9", "--nesterov", "--lr", ".1", "--lr-schedule", "cosine",
+            "--min-lr", ".001", "--batch-size", "128"], cwd=gettempdir(), env=env, text=True)
+        plans = json.loads(output)
+        self.assertEqual(len(plans), 6)
+        for plan in plans:
+            command = plan["command"]
+            value = lambda flag: command[command.index(flag) + 1]
+            resolved = resolve_config(value("--config"), mode=value("--mode"),
+                seed=int(value("--seed")), method=value("--method"),
+                momentum=float(value("--momentum")), nesterov="--nesterov" in command,
+                learning_rate=float(value("--lr")), lr_schedule=value("--lr-schedule"),
+                min_learning_rate=float(value("--min-lr")), batch_size=int(value("--batch-size")))
+            self.assertEqual(resolved.training.momentum, plan["momentum"])
+            self.assertTrue(resolved.training.nesterov)
+            self.assertEqual(resolved.training.learning_rate, .1)
+            self.assertEqual(resolved.training.lr_schedule, "cosine")
+            self.assertEqual(resolved.training.min_learning_rate, .001)
+            self.assertEqual(resolved.global_batch_size, 128)
+        with TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "optimizer.toml"
+            custom.write_text(CONFIG.read_text().replace("[training]",
+                '[training]\nmomentum = 0.9\nnesterov = true\nlr_schedule = "cosine"\nmin_learning_rate = 0.001'))
+            plan = self.dry_run("--config", str(custom), "--mode", "train", "--momentum", "0",
+                                "--no-nesterov", "--lr-schedule", "constant", "--min-lr", "0")
+            self.assertFalse(plan["nesterov"])
+            self.assertIn("--no-nesterov", plan["command"])
+            self.assertEqual(plan["momentum"], 0.)
+            self.assertEqual(plan["lr_schedule"], "constant")
+
+    def test_optional_l2_reaches_every_child_and_explicit_zero_overrides_config(self):
+        self.assertEqual(self.dry_run()["l2_coefficient"], 0.)
+        env = {**os.environ, "SAGE_PYTHON": sys.executable}
+        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
+            "--methods", "sage_e", "sage_l", "sgd", "--l2-coefficient", "0.0001"],
+            cwd=gettempdir(), env=env, text=True)
+        for plan in json.loads(output):
+            self.assertEqual(plan["l2_coefficient"], .0001)
+            command = plan["command"]
+            value = command[command.index("--l2-coefficient") + 1]
+            resolved = resolve_config(CONFIG, mode="train", l2_coefficient=float(value))
+            self.assertEqual(resolved.training.l2_coefficient, .0001)
+        with TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "custom.toml"
+            custom.write_text(CONFIG.read_text().replace("[training]", "[training]\nl2_coefficient = 0.0001"))
+            self.assertEqual(resolve_config(custom, mode="train").training.l2_coefficient, .0001)
+            self.assertEqual(resolve_config(custom, mode="train", l2_coefficient=0.).training.l2_coefficient, 0.)
 
     def test_invalid_grids_are_rejected_before_starting_any_job(self):
         for flags in (("--data-mode", "mismatch10"), ("--seed", "-1"),
-                      ("--seeds", "1", "1"), ("--seed", "1", "2", "--resume", "old")):
+                      ("--seeds", "1", "1"), ("--seed", "1", "2", "--resume", "old"),
+                      ("--l2-coefficient", "-1"), ("--l2-coefficient", "nan"),
+                      ("--mode", "validate", "--l2-coefficient", ".0001"),
+                      ("--momentum", "1"), ("--nesterov",), ("--lr", "0"),
+                      ("--min-lr", ".001"), ("--lr-schedule", "cosine", "--min-lr", "1"),
+                      ("--mode", "validate", "--momentum", ".9")):
             with self.subTest(flags=flags):
                 argv = ["launch_tpu.py", "--config", str(CONFIG), *flags]
                 with patch.object(sys, "argv", argv), patch.object(launch_tpu, "launch_job") as launch, \
