@@ -10,7 +10,8 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "Pillow>=11,<14", "filelock>=3"]
+data = ["ijson>=3.3,<4"]
+test = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "Pillow>=11,<14", "filelock>=3", "ijson>=3.3,<4"]
 train = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "Pillow>=11,<14", "datasets>=3,<6", "huggingface_hub>=0.30,<2", "filelock>=3"]
 tpu = ["jax[tpu]>=0.6,<0.12"]
 

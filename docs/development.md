@@ -1,5 +1,34 @@
 # Development record
 
+## 2026-10-19: reproducible proportional iNaturalist 2021 preparation
+
+- Recorded the user-approved 140k full-train/20k validation/all-10k-class protocol
+  in the outer local experiment record. Selection seed defaults to 42 and is
+  independent of training seeds. No mini substitution or equal train quotas.
+- Added exact largest-remainder quotas and canonical SHA-256 ranking, deterministic
+  manifests and source checksums; selections do not depend on host paths, RNG
+  library versions, input order, Python hash seed, or training state.
+- Added a standalone plan/download/verify/all CLI and a small optional `data` extra
+  for streaming annotation JSON. Stream official image tar.gz archives without
+  saving full archives; keep selected original bytes and individual SHA-256 hashes
+  in SQLite. Preserve partial progress, replay interrupted streams, lock writers,
+  and publish completion only after source/count/content verification.
+- Default limits: 15 decimal GB for preparation and 10 decimal GB free-space
+  reserve. Capacity/network failures never silently truncate/reselect/resize.
+  Network scans can still approach 232 GB; full-source download timing and actual
+  selected storage remain server measurements, not guarantees.
+- No training/model/optimizer/probe integration, new training metrics, TPU job,
+  full data download, automatic commit or push is performed by this change.
+  See inaturalist_subset.md for server preparation and cross-host verification.
+- Validation: 115 CPU/offline unit and integration tests passed. New tests cover
+  exact quotas/ties, all-class coverage, row/Python-hash independence, identical
+  manifests in two host directories, distinct selection seeds with equal quotas,
+  publication recovery, mid-split replay, selected-byte equality, corruption/source
+  checksum/missing-member/capacity failures, concurrent lock rejection and a
+  standalone CLI/module with no JAX imports. Existing two-device training/probe
+  tests remain green. No full official dataset transfer or server preparation has
+  been performed locally.
+
 ## 2026-10-18: bounded-memory theory probes after step-0 TPU OOM
 
 - Diagnosed the user's real ResNet-50/B=256 failure at the initial probe's jacrev,

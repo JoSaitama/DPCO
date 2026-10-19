@@ -22,6 +22,11 @@ See [worker0 TPU protocol](docs/tpu_training.md) for setup, prerequisites, data 
 real startup commands, and troubleshooting boundaries. See [recording contract](docs/recording.md)
 for metric/checkpoint definitions.
 
+Standalone [iNaturalist 2021 proportional subset preparation](docs/inaturalist_subset.md)
+is available for a fixed 140k-train/20k-validation selection from official full
+data. It preserves original class proportions and provides deterministic manifests
+across hosts; iNaturalist training-suite integration is not implemented yet.
+
 ## Start on worker0
 
 Use a separate Python 3.11+ environment. Do not reuse another project's dependencies:
