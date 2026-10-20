@@ -1,5 +1,9 @@
 # Worker0 TPU execution protocol
 
+The local iNaturalist adapter uses the same worker0-only execution, recording and
+optimizer controls. See [iNaturalist preparation/training](inaturalist_subset.md)
+for `run_inaturalist_suite.sh`, its local `--data-dir`, smoke and pilot commands.
+
 ## Scope
 
 The initial pipeline uses original ImageNet-100 images and a randomly initialized

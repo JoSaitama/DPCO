@@ -1,4 +1,4 @@
-"""Shared suite CLI; the supported shell entry is run_sage_suite.sh."""
+"""Shared suite CLI for ImageNet and the local iNaturalist shell entry points."""
 
 from launch_tpu import main
 

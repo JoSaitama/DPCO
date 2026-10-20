@@ -1,5 +1,34 @@
 # Development record
 
+## 2026-10-20: local iNaturalist training-suite integration
+
+- Added an independent run_inaturalist_suite.sh with the existing sequential
+  nohup TPU coordinator and all shared options. Pilot defaults: ResNet-50,
+  sage_e/sgd/sage_l, training seed 5, 2,000 steps, B=256, LR=0.01 constant,
+  L2/momentum/Nesterov off, full validation each epoch and probes off.
+- Added dataset inaturalist2021 and --data-dir propagation through parent/child,
+  class-head validation and explicit directory handling when switching sources.
+  Read the completed proportional-full manifest/SQLite selection without HF,
+  downloads, copies or reselection. Training seeds never change membership.
+- Extracted the existing image reader/transforms/shuffle/evaluation into a shared
+  module, retaining ImageNet import compatibility and cache identity. The local
+  adapter checks manifest/completion/source markers/member identities/counts and
+  byte lengths read-only; full stored-byte hashing remains an offline verify step.
+  Smoke uses a distinct limited-read view without creating another image cache.
+- Reused the actual training entry, references, methods, BatchNorm semantics,
+  status TSV, checkpoint retention/recovery, metrics and optional probes. No new
+  observation streams, theorem definitions, optimizer defaults for ImageNet or
+  TPU topology rules were introduced. Git commit/push remain manual.
+- Added offline dataset-integrity/read-only/view/cursor tests, suite override and
+  child round trips, and tiny-backbone CPU runs of all three methods through the
+  real shared entry and checkpoint resume. Actual ResNet-50 TPU execution and
+  full selected-data throughput remain server checks.
+- Validation: all 121 CPU/offline tests passed. After preserving the legacy
+  ImageNet dataset-switch configuration exactly, all 16 affected suite/iNaturalist
+  tests passed again. Shell syntax, executable permission, outside-repository
+  dry-run, child option propagation, whitespace and English-only repository
+  checks passed. No TPU job, commit or push was performed locally.
+
 ## 2026-10-19: reproducible proportional iNaturalist 2021 preparation
 
 - Recorded the user-approved 140k full-train/20k validation/all-10k-class protocol

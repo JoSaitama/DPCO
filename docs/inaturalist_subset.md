@@ -1,7 +1,8 @@
 # Proportional iNaturalist 2021 subset preparation
 
-This is a standalone data preparation tool. It does not initialize JAX/TPU, launch
-training, or add iNaturalist to the training suite. ImageNet runs are unchanged.
+Preparation remains standalone without JAX/TPU initialization. The independent
+`run_inaturalist_suite.sh` trains from its completed output using the common
+classification infrastructure. ImageNet source/cache behavior is unchanged.
 
 ## Fixed protocol
 
@@ -125,7 +126,96 @@ If interrupted exactly between manifest/checksum publication, rerun `plan` to
 recover the checksum file. Retain manifests for reproducibility even if image
 bytes are later removed manually.
 
-This subset is a proportional pilot/theory-mechanism dataset, not the official
-mini split or full benchmark. Sparse class-level examples limit per-class accuracy
-and from-scratch generalization conclusions. Training integration and launch
-parameters remain a separate implementation step.
+## Train from the completed local selection
+
+Use worker0's isolated Python environment with the existing TPU training
+dependencies. Local training does not need Hugging Face authentication, additional
+dataset libraries or a second download. The preparation `completed` event means
+both splits have passed source/content verification.
+
+The reader opens SQLite read-only. Startup checks manifest SHA-256, completion,
+source-verification markers, 10,000-class labels, exact split/member identities
+and stored byte lengths. It does not rehash 14+ GB of image bytes per run; use
+`--stage verify` above for full offline content verification. Missing/incomplete
+or mismatched data fails explicitly, without reselecting/downloading/replacing it.
+
+The identifier `inaturalist2021` means this proportional subset of official **full
+2021**, not official mini. All 10,000 classifier outputs remain present. Training
+seeds control initialization, shuffle and augmentation, separately from manifest
+selection seed 42. Existing metadata records the manifest identity; resume checks
+the data fingerprint and cursor. No new CSV streams or observation fields are added.
+
+Preview defaults without TPU initialization or local data access:
+
+```bash
+cd ~/Project_SAGE/SAGE
+source ../.venv/bin/activate
+./run_inaturalist_suite.sh --dry-run
+```
+
+Run the three real-TPU smokes sequentially first (default three updates, B=8):
+
+```bash
+mkdir -p results/logs/inaturalist2021_seed5_smoke_suite
+nohup ./run_inaturalist_suite.sh --mode smoke --seeds 5 \
+  --methods sage_e sgd sage_l \
+  --data-dir ../data/inaturalist2021_full_t140000_v20000_s42 \
+  >results/logs/inaturalist2021_seed5_smoke_suite/launcher.log 2>&1 < /dev/null &
+```
+
+Smoke checks full selection metadata, then limits reads to a prefix of at most
+`max(32, 2*B)` examples per split. It does not write another dataset or change its
+membership. This view may omit classes; the head still has 10,000 outputs. Its
+fingerprint differs from full training, preventing accidental cross-view resume.
+
+After smoke passes, launch the 2,000-step pilot:
+
+```bash
+mkdir -p results/logs/inaturalist2021_seed5_train_suite
+nohup ./run_inaturalist_suite.sh \
+  --mode train --dataset inaturalist2021 --model resnet50 --data-mode clean \
+  --methods sage_e sgd sage_l --seeds 5 --steps 2000 --batch-size 256 \
+  --data-dir ../data/inaturalist2021_full_t140000_v20000_s42 \
+  --lr 0.01 --lr-schedule constant --min-lr 0 \
+  --momentum 0 --no-nesterov --l2-coefficient 0 \
+  --eval-every-epochs 1 --checkpoint-every-steps 100 \
+  >results/logs/inaturalist2021_seed5_train_suite/launcher.log 2>&1 < /dev/null &
+```
+
+`configs/tpu/inaturalist2021_resnet50.toml` stores these defaults plus random
+initialization, float32, image size 224, five-step log printing, 50-step CSV flushing
+and probes off. The new shell reuses the existing suite coordinator and accepts
+all common method/seed/model, batch, LR/cosine-floor, momentum/Nesterov/L2,
+checkpoint and mutually exclusive validation-step/epoch overrides. `--data-dir`
+points directly to the directory containing manifest.json, manifest.sha256,
+images.sqlite and complete.json. Relative paths resolve against the repository.
+Only clean mode is implemented; mismatch labels fail explicitly.
+
+Preprocessing is shared with ImageNet: random resized crop/horizontal flip and
+ImageNet mean/std for train; resize/center crop for evaluation. Train drops an
+incomplete tail to avoid BatchNorm padding and preserves original valid-B
+averaging. Each full validation covers all configured 20,000 images with
+valid-count-weighted padding at the tail. Initial/final validation is retained.
+
+Jobs run serially on worker0's four local TPU chips; worker1 is not contacted.
+Each method/seed has isolated directories under results/logs, results/runs and
+results/files, with inaturalist2021 in its run name. The existing start/end TSV,
+CSV schemas, seven checkpoint slots and save-before-cleanup order are reused.
+The first failure stops the queue; outer nohup protects the waiting coordinator.
+
+For existing theorem probes, use `--mode validate --methods sage_e` (or sage_l)
+in a separate queue. SGD remains `--mode train`; validate mode rejects it because
+common-reference probes require SAGE. Fractions/LR scales stay in TOML, and T3
+retains the current fixed-audit diagnostic scope. No theorem definitions change.
+
+Resume one method/seed with its original settings, including any CLI overrides:
+
+```bash
+nohup ./run_inaturalist_suite.sh --mode train --methods sage_e --seeds 5 \
+  --resume YOUR_RUN_NAME --resume-slot latest \
+  >results/logs/inaturalist2021_seed5_train_suite/resume.log 2>&1 < /dev/null &
+```
+
+This is a short proportional-subset screening run, not official mini/full
+benchmark evaluation or a convergence claim. Sparse class-level examples limit
+per-class accuracy and from-scratch generalization conclusions.

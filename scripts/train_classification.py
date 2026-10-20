@@ -22,8 +22,8 @@ def run(args, config, devices, *, status):
     import jax.numpy as jnp
     from jax.sharding import NamedSharding, PartitionSpec as P
 
-    from src.data.imagenet_hf import (DataPlan, ImageBatchSource, evaluation_batches,
-                                      label_mapping, prepare)
+    from src.data.images import ImageBatchSource, evaluation_batches
+    from src.data.classification import open_training_images
     from src.methods import create_method
     from src.models.resnet import create_resnet, initialize, model_adapter
     from src.probes.classification import ClassificationProbes, ProbeBatch
@@ -43,15 +43,9 @@ def run(args, config, devices, *, status):
         raise ValueError("TPU entry requires execution.gradient_backend='jvp' to avoid full training Jacobians")
     if config.data.mode != "clean":
         raise ValueError("Data mismatch modes are not implemented; a label must not silently leave data clean")
-    mapping, manifest_hash = label_mapping(config.data, ROOT)
     limit = max(32, 2 * batch_size) if args.mode == "smoke" else None
-    plan = DataPlan(config.data.hf_repo_id, config.data.hf_revision,
-                    mapping, manifest_hash, limit, limit)
-    print(json.dumps({"event": "data_prepare_start", "dataset": config.data.name,
-        "source": plan.repo_id, "revision": plan.revision, "limited_smoke_samples": limit,
-        "note": "Full 100-class preparation may scan the larger 1K source; only selected original bytes are retained."}), flush=True)
-    images = prepare(plan, absolute_path(config.data.prepared_dir, ROOT),
-        progress=lambda **fields: print(json.dumps({"event": "data_prepare", **fields}), flush=True))
+    images, data_identity = open_training_images(config.data, ROOT, limit=limit,
+        progress=lambda **fields: print(json.dumps(fields), flush=True))
     try:
         mesh = local_mesh(devices)
         replicated = NamedSharding(mesh, P())
@@ -94,7 +88,7 @@ def run(args, config, devices, *, status):
         metadata = {"execution_mode": args.mode, "backend_requirement": "tpu_only",
             "wall_time_scope": "experiment_loop_only; data preparation and random initialization precede the loop clock",
             "worker_scope": "worker0_host_only", "data_parallel_devices": len(devices),
-            "data_plan": plan.identity, "data_fingerprint": plan.fingerprint,
+            "data_plan": data_identity, "data_fingerprint": images.fingerprint,
             "prepared_database": str(images.path), "split_counts": images.counts,
             "smoke_is_not_full_dataset_validation": args.mode == "smoke",
             "normalization": "ImageNet mean/std; train random resized crop and horizontal flip; eval resize/center crop",
@@ -131,7 +125,8 @@ def main():
     config = resolve_config(absolute_path(args.config, ROOT), mode=args.mode,
                             steps=args.steps, batch_size=args.batch_size, seed=args.seed,
                             method=args.method, dataset=args.dataset, model=args.model,
-                            data_mode=args.data_mode, l2_coefficient=args.l2_coefficient,
+                            data_mode=args.data_mode, data_dir=args.data_dir,
+                            l2_coefficient=args.l2_coefficient,
                             momentum=args.momentum, nesterov=args.nesterov,
                             learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
                             min_learning_rate=args.min_learning_rate,

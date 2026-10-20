@@ -22,10 +22,11 @@ See [worker0 TPU protocol](docs/tpu_training.md) for setup, prerequisites, data 
 real startup commands, and troubleshooting boundaries. See [recording contract](docs/recording.md)
 for metric/checkpoint definitions.
 
-Standalone [iNaturalist 2021 proportional subset preparation](docs/inaturalist_subset.md)
-is available for a fixed 140k-train/20k-validation selection from official full
-data. It preserves original class proportions and provides deterministic manifests
-across hosts; iNaturalist training-suite integration is not implemented yet.
+[iNaturalist 2021 preparation and training](docs/inaturalist_subset.md) supports the
+fixed 140k-train/20k-validation proportional selection from official full data.
+`run_inaturalist_suite.sh` reads the completed local subset without HF access,
+another download or an image copy. It shares the existing trainer, methods,
+metrics, status TSV and checkpoint implementation.
 
 ## Start on worker0
 
@@ -96,14 +97,15 @@ nohup ./run_sage_suite.sh \
 ```
 
 `--seed` and `--seeds` are aliases and accept one or more integers, for example
-`--seed 42` or `--seeds 10 15 22 46`. All shipped presets and the config default use
-42. Explicit CLI seeds override the config; an explicit seed in a custom config is
+`--seed 42` or `--seeds 10 15 22 46`. ImageNet presets and the config default use
+42; the iNaturalist pilot uses training seed 5. Explicit CLI seeds override the
+config; an explicit seed in a custom config is
 honored when the CLI omits seeds. To resume an older seed-0 run, pass `--seed 0` and
 retain all its original settings. Resume permits just one seed/method.
 
 `--methods sage_e sage_l sgd` runs each method for each listed seed, in seed-major
 order. The method labels select sage/error, sage/loss, or unmodified SGD. Select
-`--dataset imagenet100|imagenet1k`, `--model resnet50|resnet101`, and `--data-mode clean`
+`--dataset imagenet100|imagenet1k|inaturalist2021`, `--model resnet50|resnet101`, and `--data-mode clean`
 (`--datamode` is an alias). Mismatch modes are reserved and rejected before any job
 starts; a directory label never silently simulates noisy data. All grid configurations
 are validated before execution. Runs remain worker0-only and serial; failure stops
@@ -118,6 +120,25 @@ to keep the whole queue alive after SSH disconnect. Preview without starting job
 ```bash
 ./run_sage_suite.sh --methods sage_e sage_l sgd --seeds 10 15 --dry-run
 ```
+
+The independent `run_inaturalist_suite.sh` entry accepts the same options. Pilot
+defaults: ResNet-50 from scratch, training seed 5, 2,000 steps/method, B=256,
+constant LR=0.01, L2/momentum/Nesterov off, validation every epoch, probes off,
+method order `sage_e sgd sage_l`. These are screening settings, not a tuned recipe.
+
+```bash
+./run_inaturalist_suite.sh --dry-run
+mkdir -p results/logs/inaturalist2021_seed5_suite
+nohup ./run_inaturalist_suite.sh --mode train --seeds 5 \
+  --methods sage_e sgd sage_l --steps 2000 \
+  --data-dir ../data/inaturalist2021_full_t140000_v20000_s42 \
+  >results/logs/inaturalist2021_seed5_suite/launcher.log 2>&1 < /dev/null &
+```
+
+`--data-dir` is repository-relative or absolute and reaches every child. For
+iNaturalist it is the directory containing the completed manifest and SQLite
+database; for ImageNet it is the fingerprint-cache parent. Training seeds never
+change subset membership. See the iNaturalist guide for smoke/probes/resume.
 
 Set `--checkpoint-every-steps 10` (or 100, etc.) to control the rolling latest
 recovery checkpoint. The positive integer overrides `[checkpoints]

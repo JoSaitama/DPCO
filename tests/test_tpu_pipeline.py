@@ -51,7 +51,7 @@ def fake_stream(plan, split):
 
 class TPUPipelineTests(unittest.TestCase):
     def test_manifest_and_paired_tpu_presets(self):
-        paths = sorted((ROOT / "configs/tpu").glob("*.toml"))
+        paths = sorted((ROOT / "configs/tpu").glob("imagenet*.toml"))
         self.assertEqual(len(paths), 2)
         configs = [load_config(path) for path in paths]
         for config in configs:

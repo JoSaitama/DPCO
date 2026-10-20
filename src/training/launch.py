@@ -4,7 +4,7 @@ import argparse
 from dataclasses import replace
 from pathlib import Path
 
-from src.config import MethodConfig, ReferenceConfig, load_config
+from src.config import DATASET_CLASSES, INATURALIST_PREPARED_DIR, MethodConfig, ReferenceConfig, load_config
 
 
 EXPERIMENT_METHODS = {"sgd": ("sgd", "loss"), "sage_e": ("sage", "error"),
@@ -15,13 +15,14 @@ def add_overrides(parser, *, multiple=False):
     """Use identical override names in the launcher and single-run child."""
     if multiple:
         parser.add_argument("--seed", "--seeds", dest="seeds", nargs="+", type=int,
-                            help="One or more seeds; shipped configs default to 42")
+                            help="One or more seeds; omission honors the selected config")
         parser.add_argument("--method", "--methods", dest="methods", nargs="+",
                             choices=tuple(EXPERIMENT_METHODS))
     else:
         parser.add_argument("--seed", type=int)
         parser.add_argument("--method", choices=tuple(EXPERIMENT_METHODS))
-    parser.add_argument("--dataset", choices=("imagenet100", "imagenet1k"))
+    parser.add_argument("--dataset", choices=tuple(DATASET_CLASSES))
+    parser.add_argument("--data-dir", help="Prepared data location, relative to the repository or absolute; iNaturalist uses the subset directory itself")
     parser.add_argument("--model", choices=("resnet50", "resnet101"))
     parser.add_argument("--data-mode", "--datamode", dest="data_mode",
                         help="Only clean is implemented; mismatch modes are reserved")
@@ -45,7 +46,7 @@ def add_overrides(parser, *, multiple=False):
 
 
 def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
-                   method=None, dataset=None, model=None, data_mode=None, l2_coefficient=None,
+                   method=None, dataset=None, model=None, data_mode=None, data_dir=None, l2_coefficient=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
                    min_learning_rate=None, checkpoint_every_steps=None,
                    eval_every_steps=None, eval_every_epochs=None):
@@ -60,8 +61,19 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         name, reference = EXPERIMENT_METHODS[method]
         config = replace(config, method=MethodConfig(name), reference=ReferenceConfig(reference))
     if dataset is not None:
+        directory = config.data.prepared_dir
+        if (dataset == "inaturalist2021") != (config.data.name == "inaturalist2021"):
+            directory = INATURALIST_PREPARED_DIR if dataset == "inaturalist2021" else "../data"
+        manifest = config.data.class_manifest
+        if dataset == "inaturalist2021":
+            manifest = None
+        elif dataset == "imagenet100" and manifest is None:
+            manifest = "configs/manifests/imagenet100_classes.txt"
         config = replace(config, data=replace(config.data, name=dataset,
-            num_classes={"imagenet100": 100, "imagenet1k": 1000}[dataset]))
+            num_classes=DATASET_CLASSES[dataset], prepared_dir=directory,
+            class_manifest=manifest))
+    if data_dir is not None:
+        config = replace(config, data=replace(config.data, prepared_dir=data_dir))
     if model is not None:
         config = replace(config, model=replace(config.model, name=model))
     if data_mode is not None:

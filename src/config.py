@@ -8,6 +8,8 @@ import tomllib
 
 METHODS = ("sgd", "sage", "sage_loo", "dtv", "dtv_loo", "random_flip")
 REFERENCES = ("loss", "error")
+DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000}
+INATURALIST_PREPARED_DIR = "../data/inaturalist2021_full_t140000_v20000_s42"
 
 
 @dataclass(frozen=True)
@@ -121,7 +123,7 @@ class RunConfig:
             raise ValueError(f"Unknown reference: {self.reference.name}")
         if not 0 <= self.method.flip_probability <= 1:
             raise ValueError("flip_probability must be in [0, 1]")
-        classes = {"imagenet100": 100, "imagenet1k": 1000}
+        classes = DATASET_CLASSES
         if self.data.name not in classes:
             raise ValueError(f"Unsupported dataset: {self.data.name}")
         if self.data.num_classes != classes[self.data.name]:
