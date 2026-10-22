@@ -18,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.config import load_config
-from src.training.launch import absolute_path, add_overrides, resolve_config
+from src.training.launch import (absolute_path, add_overrides, diagnostic_cli_args,
+                                 diagnostic_overrides, resolve_config)
 from src.training.results import ResultsPaths, make_run_name
 from src.training.runtime import configure_worker0
 from src.training.status import RunStatus
@@ -45,6 +46,7 @@ def plan_job(args, path, config, method):
             command.extend([flag, str(value)])
     if args.nesterov is not None:
         command.append("--nesterov" if args.nesterov else "--no-nesterov")
+    command.extend(diagnostic_cli_args(args))
     if args.resume:
         command.extend(["--resume", "--resume-slot", args.resume_slot])
     return paths, command
@@ -128,7 +130,8 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
                 l2_coefficient=args.l2_coefficient, momentum=args.momentum, nesterov=args.nesterov,
                 learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
                 min_learning_rate=args.min_learning_rate, checkpoint_every_steps=args.checkpoint_every_steps,
-                eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs)
+                eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
+                **diagnostic_overrides(args))
             jobs.append((config, method))
     wait = args.wait or len(jobs) > 1
     if args.dry_run:
@@ -147,7 +150,10 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             "min_learning_rate": config.training.min_learning_rate,
             "checkpoint_every_steps": config.checkpoints.latest_every_steps,
             "evaluation_mode": config.evaluation.mode,
-            "evaluation_interval": config.evaluation.interval} for config, paths, command in previews]
+            "evaluation_interval": config.evaluation.interval,
+            "diagnostics": config.as_dict()["diagnostics"],
+            "active_diagnostic_state_steps": [t for t in config.diagnostics.steps
+                if config.diagnostics.enabled and t < config.training.total_steps]} for config, paths, command in previews]
         print(json.dumps(plans[0] if len(plans) == 1 else plans, indent=2))
         return
     for config, method in jobs:

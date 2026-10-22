@@ -85,6 +85,23 @@ class ProbeConfig:
 
 
 @dataclass(frozen=True)
+class DiagnosticConfig:
+    """Optional observers of real updates; steps count PRE-update states.
+
+    State step t observes update t+1. Nodes beyond the update budget are inactive,
+    so a short smoke can use the same configuration as a longer diagnostic run.
+    """
+    enabled: bool = False
+    steps: tuple[int, ...] = (0, 5, 10, 20, 25, 30, 50, 75, 100)
+    update_check: bool = True
+    paired_loss: bool = True
+    transfer: bool = True
+    lr_scales: tuple[float, ...] = (1., .5, .25, .125, .0625)
+    audit_batches: int = 2
+    audit_seed: int = 42
+
+
+@dataclass(frozen=True)
 class ResultsConfig:
     root_dir: str = "results"
 
@@ -110,6 +127,7 @@ class RunConfig:
     evaluation: EvaluationConfig = EvaluationConfig()
     checkpoints: CheckpointConfig = CheckpointConfig()
     probes: ProbeConfig = ProbeConfig()
+    diagnostics: DiagnosticConfig = DiagnosticConfig()
     execution: ExecutionConfig = ExecutionConfig()
     seed: int = 42
     global_batch_size: int = 256
@@ -198,6 +216,26 @@ class RunConfig:
             raise ValueError("Probe learning-rate scales must be positive and finite")
         if self.probes.enabled and self.method.name != "sage":
             raise ValueError("Common-reference theorem probes currently require full sage")
+        d = self.diagnostics
+        for flag in (d.enabled, d.update_check, d.paired_loss, d.transfer):
+            if not isinstance(flag, bool):
+                raise ValueError("Diagnostic switches must be booleans")
+        if (not d.steps or any(isinstance(t, bool) or not isinstance(t, int) or t < 0 for t in d.steps)
+                or len(set(d.steps)) != len(d.steps)):
+            raise ValueError("Diagnostic steps must be distinct nonnegative completed-update counts")
+        if not d.lr_scales or any(isinstance(s, bool) or not math.isfinite(s) or s <= 0 for s in d.lr_scales):
+            raise ValueError("Diagnostic learning-rate scales must be positive and finite")
+        if isinstance(d.audit_batches, bool) or not isinstance(d.audit_batches, int) or d.audit_batches <= 0:
+            raise ValueError("Diagnostic audit_batches must be a positive integer")
+        if isinstance(d.audit_seed, bool) or not isinstance(d.audit_seed, int) or not 0 <= d.audit_seed < 2**32:
+            raise ValueError("Diagnostic audit_seed must be an integer in [0, 2**32)")
+        if d.enabled:
+            if not (d.update_check or d.paired_loss or d.transfer):
+                raise ValueError("Enable at least one diagnostic check")
+            if self.method.name not in ("sgd", "sage"):
+                raise ValueError("Real-update diagnostics cover SGD and full common-reference SAGE only")
+            if self.training.momentum != 0 or self.training.l2_coefficient != 0:
+                raise ValueError("Real-update diagnostics require momentum=0 and l2_coefficient=0")
         if not self.data.mode or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-." for c in self.data.mode):
             raise ValueError("data.mode must be a safe name such as clean or mismatch10")
 
@@ -219,6 +257,7 @@ def load_config(path: str | Path) -> RunConfig:
         evaluation=EvaluationConfig(**raw.pop("evaluation", {})),
         checkpoints=CheckpointConfig(**raw.pop("checkpoints", {})),
         probes=ProbeConfig(**raw.pop("probes", {})),
+        diagnostics=DiagnosticConfig(**raw.pop("diagnostics", {})),
         execution=ExecutionConfig(**raw.pop("execution", {})),
         **raw,
     )

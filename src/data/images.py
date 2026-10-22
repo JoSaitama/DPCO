@@ -95,6 +95,17 @@ class ImageBatchSource:
         return {"epoch": self.epoch, "cursor": self.cursor, "seed": self.seed,
                 "data_fingerprint": self.images.fingerprint}
 
+    def diagnostic_context(self):
+        """Describe the last emitted batch without advancing any RNG or cursor."""
+        start = self.cursor - self.batch_size
+        if start < 0:
+            raise ValueError("A diagnostic context requires an already emitted batch")
+        return {"batch_id": f"train_epoch_{self.epoch}_offset_{start}",
+                "sample_indices": [int(i) for i in self.order[start:self.cursor]],
+                "epoch": self.epoch, "cursor_start": start, "training_seed": self.seed,
+                "data_fingerprint": self.images.fingerprint,
+                "augmentation_stream": "training: seed/epoch/sample-index/1"}
+
     def restore(self, snapshot):
         if snapshot["seed"] != self.seed or snapshot["data_fingerprint"] != self.images.fingerprint:
             raise ValueError("Data snapshot does not match this experiment")

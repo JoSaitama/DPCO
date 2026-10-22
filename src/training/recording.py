@@ -22,6 +22,25 @@ SCHEMAS = {
     "summary": ("status", "step", "samples_seen", "elapsed_wall_s", "final_val_ce", "final_val_top1", "final_val_top5", "best_val_top1", "best_step", "error"),
 }
 
+# Real-update diagnostics deliberately have their own streams. Legacy theorem
+# CSV meanings and headers stay unchanged, including their historical step axis.
+DIAGNOSTIC_BASE = ("step", "update_step", "source_batch_id", "trajectory_method", "reference")
+DIAGNOSTIC_PAIR = (*DIAGNOSTIC_BASE, "objective_mode", "learning_rate", "reference_delta",
+    "norm_sgd_sq", "norm_sage_sq", "selected_count", "lr_scale", "probe_lr", "j_initial",
+    "j_sgd", "j_sage", "difference", "difference_over_lr", "objective_gain",
+    "first_order_residual", "actual_update_in_pair", "finite")
+SCHEMAS.update({
+    "diagnostic_context": (*DIAGNOSTIC_BASE, "learning_rate", "cumulative_eta_before",
+        "objective_mode", "source_context_json"),
+    "diagnostic_update": (*DIAGNOSTIC_BASE, "learning_rate", "valid_batch_size", "error_count",
+        "flip_count", "reference_valid", "reference_delta", "identity_residual", "score_min_abs",
+        "norm_sgd_sq", "norm_sage_sq", "direction_l2_error", "direction_relative_error",
+        "parameter_l2_error", "parameter_relative_error", "replayed_parameter_l2_error",
+        "model_state_max_abs_error", "replayed_model_state_max_abs_error", "finite"),
+    "diagnostic_paired": (*DIAGNOSTIC_PAIR, "objective"),
+    "diagnostic_transfer": (*DIAGNOSTIC_PAIR, "target_batch_id", "overlap_sample_count", "transfer_difference"),
+})
+
 
 def atomic_json(path, value):
     temporary = path.with_suffix(path.suffix + ".tmp")

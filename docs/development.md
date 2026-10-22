@@ -1,5 +1,73 @@
 # Development record
 
+## 2026-10-22: optional diagnostics on real training updates
+
+- User authorized implementation of the three agreed early-reversal checks. Keep
+  one selected method for the entire trajectory; do not introduce edit warm-up,
+  alternating SGD steps, last-layer scoring or a new loss/regularizer. The earlier
+  read-only restriction is superseded only for this diagnostic implementation.
+- Added disabled-by-default diagnostics with independently controlled update,
+  paired-source-loss and training-target-transfer checks. All switches, absolute
+  state nodes, LR scales and audit-bank controls propagate through both shell
+  suites, the nohup parent and child; dry-run prints effective settings. Legacy
+  fixed-batch theorem probes remain independently controlled and unchanged.
+- Preserve the original compiled training kernel. At selected states retain the
+  real batch/before-state, run the normal update once, then inspect its real
+  after-parameters. Independent scalar-loss gradients and method replay localize
+  direction/update/BN-state discrepancies. Sequential whole-batch JIT stages
+  bound simultaneously live activation workspaces without dense runtime Jacobians.
+- Pair candidate losses at the frozen before-state. Scale1 uses the real candidate
+  for the trajectory method; smaller scales use independent reconstructed directions.
+  SAGE-E error masks stay frozen. Reference Delta and evaluated-objective projection
+  have separate names; an implementation error can affect the scale1 residual.
+- Prepare a reproducible training audit bank with a separate seed/fixed training
+  augmentations; record membership once and source overlap per node. No training
+  examples are withheld, iterator/RNG advanced, bank reselected, or sample energy
+  computed. Target projections/loss differences are finite-bank diagnostics, not
+  a global convergence or population guarantee.
+- Register diagnostic_context/update/paired/transfer CSV streams in the shared
+  recorder. step=t observes update_step=t+1, which matches the train CSV row;
+  store source indices/epoch/augmentation context for replay. Flush at nodes,
+  preserve CSV-cursor resume/legacy-disabled compatibility, and record diagnostic
+  time separately. Disabled diagnostics create no bank, AD evaluations or output
+  files. The small host-side enable check leaves the original training trace intact.
+- English comments and docs describe switches, provenance, numerical interpretation
+  and a 200-update ImageNet100/ResNet50/LR0.01/seed2 launch. LR*step is logged through
+  cumulative step sizes and is not hard-coded as a universal reversal threshold.
+- Validation: 135 CPU/offline tests passed with JAX0.8.1/Flax0.12.0, including dense
+  oracle parity, sharded two-CPU global-BN parity, tiny-ResNet real-entry execution,
+  injected wrong-LR/double-state faults, exact on/off trajectory equality, fixed
+  masks/empty-reference/zero-LR handling, all individual switches, CLI round trips,
+  and checkpoint resume without duplicate diagnostic records. Shell/Python syntax,
+  whitespace and English-only content checks passed. No server TPU job, commit
+  or push was performed; actual TPU memory/timing/residuals still require testing.
+
+## 2026-10-21: training-objective-first theory validation protocol
+
+- Professor/user priority: the current optimizer study evaluates training
+  optimization and convergence speed first. Use unsigned train CE and training
+  top-1 versus completed updates/sample exposures as primary outcome evidence.
+  Training accuracy is a companion metric; the differentiable optimized objective
+  remains CE. Validation/test/final held-out accuracy belong to a later model
+  quality/generalization study and are excluded from this phase's conclusions.
+- Retain the mechanism evidence required by each theorem: T1 checks reference
+  projection/sign aggregation/Delta; T2 compares actual objectives after paired
+  one-step updates from one frozen state; T3 needs its fixed-target and cumulative
+  conditions. Training curves support optimization outcomes but do not replace
+  those identities, conditions or expectation estimates. Do not silently change
+  the professor's statements into an unconditional ordering of independent runs.
+- First audit the existing ImageNet-100/ResNet-50, LR=0.01, seed-2 SGD/SAGE-E/
+  SAGE-L training exports across early, middle and late stages. Check code,
+  normalization, update/state/recording semantics and the earliest loss reversal
+  before attributing the gap to backbone choice or changing the model/recipe.
+- Use raw observations together with explicitly labeled fixed-window summaries.
+  Recorded train metrics describe the current batch before its indexed update;
+  preserve this convention. Do not interpret cross-batch CE differences as T2's
+  paired same-objective gain, or fixed-budget loss gaps as a statistical expectation.
+- This instruction authorizes protocol documentation and read-only analysis of
+  existing data. It does not authorize training-code/config changes, new runtime
+  metrics, disabling scheduled evaluation, server launches, commits or pushes.
+
 ## 2026-10-20: local iNaturalist training-suite integration
 
 - Added an independent run_inaturalist_suite.sh with the existing sequential

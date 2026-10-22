@@ -43,13 +43,52 @@ def add_overrides(parser, *, multiple=False):
                             help="Run full configured validation every N completed updates")
     evaluation.add_argument("--eval-every-epochs", type=float,
                             help="Run full configured validation every N epochs of sample progress; default 1")
+    parser.add_argument("--theorem-probes", action=argparse.BooleanOptionalAction, default=None,
+                        help="Control legacy fixed-batch theorem probes independently of real-update diagnostics")
+    parser.add_argument("--diagnostics", action=argparse.BooleanOptionalAction, default=None,
+                        help="Read-only real-update diagnostics; default off; no change to the optimizer")
+    parser.add_argument("--diagnostic-steps", nargs="+", type=int,
+                        help="Completed updates BEFORE the inspected update: state t observes update t+1")
+    for flag in ("update-check", "paired-loss", "transfer"):
+        parser.add_argument(f"--diagnostic-{flag}", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--diagnostic-lr-scales", nargs="+", type=float)
+    parser.add_argument("--diagnostic-audit-batches", type=int)
+    parser.add_argument("--diagnostic-audit-seed", type=int)
+
+
+DIAGNOSTIC_OPTIONS = ("theorem_probes", "diagnostics", "diagnostic_steps", "diagnostic_update_check",
+                      "diagnostic_paired_loss", "diagnostic_transfer", "diagnostic_lr_scales",
+                      "diagnostic_audit_batches", "diagnostic_audit_seed")
+
+
+def diagnostic_overrides(args):
+    """Keep parent, child and shell-suite diagnostic options identical."""
+    return {name: getattr(args, name, None) for name in DIAGNOSTIC_OPTIONS}
+
+
+def diagnostic_cli_args(args):
+    command = []
+    for name, value in diagnostic_overrides(args).items():
+        if value is None:
+            continue
+        flag = "--" + name.replace("_", "-")
+        if isinstance(value, bool):
+            command.append(flag if value else "--no-" + flag[2:])
+        elif isinstance(value, (list, tuple)):
+            command.extend([flag, *(str(item) for item in value)])
+        else:
+            command.extend([flag, str(value)])
+    return command
 
 
 def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    method=None, dataset=None, model=None, data_mode=None, data_dir=None, l2_coefficient=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
                    min_learning_rate=None, checkpoint_every_steps=None,
-                   eval_every_steps=None, eval_every_epochs=None):
+                   eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
+                   diagnostics=None, diagnostic_steps=None, diagnostic_update_check=None,
+                   diagnostic_paired_loss=None, diagnostic_transfer=None, diagnostic_lr_scales=None,
+                   diagnostic_audit_batches=None, diagnostic_audit_seed=None):
     if eval_every_steps is not None and eval_every_epochs is not None:
         raise ValueError("eval_every_steps and eval_every_epochs are mutually exclusive")
     config = load_config(path)
@@ -111,6 +150,14 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         config = replace(config, logging=replace(config.logging, mode="steps", interval=1))
     if mode == "validate":
         config = replace(config, probes=replace(config.probes, enabled=True))
+    if theorem_probes is not None:
+        config = replace(config, probes=replace(config.probes, enabled=theorem_probes))
+    diagnostic_changes = {name: value for name, value in (
+        ("enabled", diagnostics), ("steps", diagnostic_steps), ("update_check", diagnostic_update_check),
+        ("paired_loss", diagnostic_paired_loss), ("transfer", diagnostic_transfer),
+        ("lr_scales", diagnostic_lr_scales), ("audit_batches", diagnostic_audit_batches),
+        ("audit_seed", diagnostic_audit_seed)) if value is not None}
+    config = replace(config, diagnostics=replace(config.diagnostics, **diagnostic_changes))
     config.validate()
     return config
 

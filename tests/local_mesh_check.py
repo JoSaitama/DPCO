@@ -57,6 +57,21 @@ def main():
             task, reference, p, b, s, include_energy=True))(sharded.params, sharded_batch, sharded.model_state)
         for a, b in zip(jax.tree_util.tree_leaves(expected), jax.tree_util.tree_leaves(actual)):
             np.testing.assert_allclose(a, b, rtol=2e-5, atol=2e-6)
+    # Real-update observers must retain the same whole-batch BN geometry on a
+    # sharded trajectory, and must not replace the actual compiled update.
+    from src.config import DiagnosticConfig
+    from src.probes.training_diagnostics import TrainingDiagnostics
+    method = create_method("sage", reference_name="loss", gradient_backend="jvp")
+    trainer = LocalMeshTrainer(task, method, make_updater(TrainingConfig(learning_rate=.01)), local_mesh(jax.local_devices()))
+    before = jax.device_put(initial, trainer.replicated)
+    after, _ = trainer.compile_step()(before, sharded_batch, jax.random.key(0))
+    diagnostic = TrainingDiagnostics(task, method, DiagnosticConfig(enabled=True, transfer=False, lr_scales=(1.,)),
+        reference_name="loss", trajectory_method="sage")
+    rows = diagnostic.run(before, after, sharded_batch, learning_rate=.01, rng_key=jax.random.key(0),
+        context={"batch_id": "global_sharded_batch"}, cumulative_eta_before=0.)
+    row = next(row for stream, row in rows if stream == "diagnostic_update")
+    assert row["direction_relative_error"] < 2e-5, row
+    assert row["model_state_max_abs_error"] < 2e-6, row
     print("PASS: two-device global BN, reference/error count, JVP scores, bounded-memory probes, momentum/cosine/L2 and weighted updates match full Jacobian")
 
 

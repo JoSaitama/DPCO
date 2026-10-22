@@ -28,6 +28,12 @@ fixed 140k-train/20k-validation proportional selection from official full data.
 another download or an image copy. It shares the existing trainer, methods,
 metrics, status TSV and checkpoint implementation.
 
+[Real-update training diagnostics](docs/training_diagnostics.md) provides optional
+early-step update checks, paired source-batch losses and transfer to other training
+batches. Enable with `--diagnostics` through either shell suite; default is off.
+The observer preserves the selected optimizer and original compiled training step.
+Its switches are independent of the older fixed-batch theorem probes.
+
 ## Start on worker0
 
 Use a separate Python 3.11+ environment. Do not reuse another project's dependencies:

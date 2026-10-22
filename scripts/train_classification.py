@@ -11,7 +11,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.training.launch import absolute_path, add_overrides, resolve_config
+from src.training.launch import absolute_path, add_overrides, diagnostic_overrides, resolve_config
 from src.training.runtime import configure_worker0, require_local_tpu
 from src.training.results import ResultsPaths
 from src.training.status import RunStatus
@@ -62,6 +62,19 @@ def run(args, config, devices, *, status):
             flip_probability=config.method.flip_probability, gradient_backend="jvp")
         trainer = LocalMeshTrainer(train_task, method, updater, mesh)
         source = ImageBatchSource(images, batch_size, image_size, config.seed)
+        diagnostics = None
+        if config.diagnostics.enabled:
+            from dataclasses import replace
+            from src.data.diagnostic_batches import training_audit_batches
+            from src.probes.training_diagnostics import TrainingDiagnostics
+
+            audits = ()
+            if config.diagnostics.transfer:
+                audits = tuple(replace(item, batch=jax.device_put(item.batch, trainer.batch_sharding))
+                    for item in training_audit_batches(images, batch_size, image_size,
+                        config.diagnostics.audit_batches, config.diagnostics.audit_seed))
+            diagnostics = TrainingDiagnostics(train_task, method, config.diagnostics,
+                reference_name=config.reference.name, trajectory_method=config.method.name, audit_batches=audits)
         batch_metrics = jax.jit(lambda p, b, s: task_metrics(eval_task.evaluate(p, b, s), include_top5=True),
             in_shardings=(replicated, trainer.batch_sharding, replicated), out_shardings=replicated)
         evaluation = EvaluationSpec(eval_task,
@@ -103,7 +116,7 @@ def run(args, config, devices, *, status):
             "theorem_scope": "reference identities and fixed-target diagnostics, not an automatic convergence-rate proof"}
         runner = ExperimentRunner(config, trainer, source, evaluation, base_dir=ROOT,
             train_sample_count=images.counts["train"], metadata=metadata, probes=probes,
-            run_name=args.run_name, resume=args.resume, reserved=args.reserved, status=status)
+            run_name=args.run_name, resume=args.resume, reserved=args.reserved, status=status, diagnostics=diagnostics)
         runner.run(state, resume_slot=args.resume_slot)
     finally:
         images.close()
@@ -131,7 +144,8 @@ def main():
                             learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
                             min_learning_rate=args.min_learning_rate,
                             checkpoint_every_steps=args.checkpoint_every_steps,
-                            eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs)
+                            eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
+                            **diagnostic_overrides(args))
     paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT).experiment(args.run_name)
     status = RunStatus(paths, config, mode=args.mode, resume=args.resume, attempt_id=args.attempt_id)
     with status.monitor():

@@ -185,6 +185,12 @@ Current JVP mode supports full references; LOO remains in the separate audit bac
 
 ## Validation and training modes
 
+For the optional early CE-reversal investigation, use mode `train` with
+`--diagnostics --no-theorem-probes`. See [real-update diagnostics](training_diagnostics.md)
+for the 200-update worker0 command, state/update indexing, individual switches,
+CSV fields and costs. It keeps one selected method throughout the trajectory and
+does not introduce edit warm-up or alternating SGD updates.
+
 For short T1-3 diagnostics after smoke succeeds:
 
 ```bash

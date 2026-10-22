@@ -4,7 +4,7 @@ This is not an ImageNet reader or a TPU launcher. A training source must impleme
 __next__, snapshot and restore, including its shuffle/augmentation RNG state.
 """
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import math
 import time
@@ -12,7 +12,7 @@ import time
 import jax
 import numpy as np
 
-from src.config import TrainingConfig
+from src.config import DiagnosticConfig, TrainingConfig
 from src.methods.base import AlignmentMethod
 from src.training.checkpoints import CheckpointStore
 from src.training.randomness import training_key
@@ -25,7 +25,7 @@ from src.training.status import RunStatus
 class ExperimentRunner:
     def __init__(self, config, trainer, source, evaluation, *, base_dir,
                  train_sample_count, metadata, probes=None, console=True,
-                 run_name=None, resume=False, reserved=False, status=None):
+                 run_name=None, resume=False, reserved=False, status=None, diagnostics=None):
         config.validate()
         if train_sample_count <= 0:
             raise ValueError("train_sample_count must be positive")
@@ -35,6 +35,8 @@ class ExperimentRunner:
             raise TypeError("Training source must support exact snapshot/restore")
         if config.probes.enabled and probes is None:
             raise ValueError("Enabled probes require an explicit read-only probe adapter")
+        if config.diagnostics.enabled and diagnostics is None:
+            raise ValueError("Enabled real-update diagnostics require an explicit read-only adapter")
         if resume and run_name is None:
             raise ValueError("Resume requires an explicit existing run name")
         if config.probes.enabled and not isinstance(trainer.method, AlignmentMethod):
@@ -44,6 +46,7 @@ class ExperimentRunner:
             record = config.probes.enabled and (config.probes.theorem1 or config.probes.theorem3)
             self.trainer = trainer.with_method(replace(trainer.method, record_theory=record))
         self.evaluation, self.probes = evaluation, probes
+        self.diagnostics = diagnostics if config.diagnostics.enabled else None
         self.sample_count = train_sample_count
         self.paths = ResultsPaths.resolve(config.results.root_dir, base_dir=base_dir).experiment(run_name or make_run_name(config))
         if reserved and not resume:
@@ -64,6 +67,7 @@ class ExperimentRunner:
             "state_convention": "step counts completed updates; train metrics describe parameters before that update",
             "accuracy_unit": "fraction", "rng_convention": "seed/step/stream; source owns data RNG",
             "train_timestamp_convention": "host dispatch time; window throughput synchronizes device completion",
+            **({"training_diagnostics": self.diagnostics.metadata()} if self.diagnostics is not None else {}),
         }, console=console, resume=resume, status=status)
         if resume:
             stored_config = json.loads((self.paths.logs / "metadata.json").read_text())["config"]
@@ -71,6 +75,9 @@ class ExperimentRunner:
             # Compare its implicit default without rewriting original metadata.
             for key in ("l2_coefficient", "momentum", "nesterov", "lr_schedule", "min_learning_rate"):
                 stored_config["training"].setdefault(key, getattr(TrainingConfig(), key))
+            # Legacy runs implicitly had diagnostics disabled. Do not enable an
+            # observer during resume or reinterpret their existing CSV records.
+            stored_config.setdefault("diagnostics", json.loads(json.dumps(asdict(DiagnosticConfig()))))
             if stored_config != json.loads(json.dumps(config.as_dict())):
                 self.recorder.close()
                 raise ValueError("Resume configuration differs from the original run")
@@ -109,6 +116,7 @@ class ExperimentRunner:
         self.log_schedule.seek(step, samples_seen)
         self.eval_schedule.seek(step, samples_seen)
         nodes = milestone_steps(c.training.total_steps, c.probes.fractions)
+        diagnostic_nodes = set(c.diagnostics.steps) if self.diagnostics is not None else set()
         milestones = {}
         for fraction, slot in ((0., "initial"), (.25, "p25"), (.5, "p50"), (.75, "p75"), (1., "final")):
             milestones.setdefault(math.ceil(fraction * c.training.total_steps), []).append(slot)
@@ -238,7 +246,14 @@ class ExperimentRunner:
 
             while step < c.training.total_steps:
                 before_samples = samples_seen
+                diagnostic_due = self.diagnostics is not None and step in diagnostic_nodes
                 batch = next(self.source)
+                if diagnostic_due:
+                    # Retain only selected states. The NORMAL compiled step below
+                    # remains identical, with no extra gradient outputs or traces.
+                    before_state = state
+                    context = (self.source.diagnostic_context() if callable(getattr(self.source, "diagnostic_context", None))
+                               else {"batch_id": f"training_update_{step + 1}", "source_state": self.source.snapshot()})
                 # Source-side batches are host data; count without synchronizing TPU metrics.
                 count = int(np.count_nonzero(np.asarray(batch.valid_mask)))
                 rate = self.trainer.updater.learning_rate
@@ -257,10 +272,25 @@ class ExperimentRunner:
                 node_due = c.probes.enabled and step in nodes
                 log_due = self.log_schedule.would_trigger(step, samples_seen)
                 boundary = (len(pending) >= c.logging.timing_window_steps or step % c.logging.csv_flush_steps == 0
-                            or log_due or eval_due or node_due or save_slots or step == c.training.total_steps)
+                            or log_due or eval_due or node_due or save_slots or diagnostic_due or step == c.training.total_steps)
                 if boundary:
                     drain()
                     jax.block_until_ready(state)
+                    if diagnostic_due:
+                        before_diagnostic = time.perf_counter()
+                        rows = self.diagnostics.run(before_state, state, batch, learning_rate=eta,
+                            rng_key=training_key(c.seed, before_state.step), context=context,
+                            cumulative_eta_before=cumulative["cumulative_eta"] - eta)
+                        for stream, row in rows:
+                            recorder.record(stream, **row)
+                        duration = time.perf_counter() - before_diagnostic
+                        timing("diagnostic", duration)
+                        recorder.log("diagnostic", step=int(before_state.step), update_step=step,
+                                     rows=len(rows), duration_s=duration)
+                        # Synchronizing/writing happens only at diagnostic nodes;
+                        # release the frozen parameter tree immediately afterwards.
+                        recorder.flush()
+                        del before_state, context, rows
                     if eval_due or step == c.training.total_steps:
                         if evaluate():
                             save_slots.append("best")
