@@ -31,12 +31,16 @@ class RunStatus:
         self.identity = dict(
             run_name=paths.name, attempt_id=attempt_id or uuid4().hex,
             dataset=config.data.name, data_mode=config.data.mode,
-            model=config.model.name, method=config.method.name,
+            model=config.model.name, method=(f"sage_policy_{config.method.policy_mode}"
+                if config.method.name == "sage_policy" else config.method.name),
             reference=config.reference.name if config.method.name in
-                ("sage", "sage_loo", "dtv", "dtv_loo") else "",
+                ("sage", "sage_loo", "dtv", "dtv_loo", "sage_policy") else "",
             seed=config.seed, initial_lr=config.training.learning_rate,
             mode=mode, resume=resume, total_steps=config.training.total_steps,
         )
+        if (config.method.name == "sage_policy" and config.method.policy_mode == "alternating"
+                and config.method.alternating_first == "sage"):
+            self.identity["method"] += "_first_sage"
         self.terminal = None
         self._depth = 0
         self._pending_success = False

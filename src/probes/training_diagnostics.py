@@ -93,11 +93,12 @@ class TrainingDiagnostics:
 
     def __init__(self, task, method, config, *, reference_name, trajectory_method,
                  audit_batches=(), objective_mode="train_batch_bn; frozen_before_buffers"):
-        if reference_name not in ("loss", "error") or trajectory_method not in ("sgd", "sage"):
+        if reference_name not in ("loss", "error") or trajectory_method not in ("sgd", "sage", "sage_policy"):
             raise ValueError("Diagnostics require a loss/error reference and an SGD/SAGE trajectory")
         if config.transfer and len(audit_batches) != config.audit_batches:
             raise ValueError("Transfer diagnostics require the configured fixed training audit bank")
         self.task, self.config = task, config
+        self.method = method
         self.reference_name, self.trajectory_method = reference_name, trajectory_method
         self.audit_batches, self.objective_mode = tuple(audit_batches), objective_mode
         self._forward = jax.jit(task.evaluate)
@@ -155,7 +156,7 @@ class TrainingDiagnostics:
             reference, scores, weights, gd, gs, result.model_state)
 
     def metadata(self):
-        return {"schema_version": 1, "state_step": "completed updates BEFORE inspected update",
+        metadata = {"schema_version": 1, "state_step": "completed updates BEFORE inspected update",
                 "update_step": "state step + 1; matches the training CSV row",
                 "checks": "independent scalar-loss AD, real candidate at scale 1, training-audit transfer",
                 "candidate_policy": "scale 1 uses actual after.params for the trajectory method; others use independent directions",
@@ -168,6 +169,12 @@ class TrainingDiagnostics:
                 "overlap_policy": "fixed bank, overlap counted, no target reselection or training exclusion",
                 "scope": "finite training-audit targets; not a population or convergence certificate",
                 "sample_energy": "not measured; no per-example energy loop"}
+        if self.trajectory_method == "sage_policy":
+            metadata.update(policy_mode=self.method.mode,
+                alternating_first=self.method.alternating_first,
+                policy_comparison="diagnostic_policy compares the active policy to SGD; legacy paired/transfer compare FULL SAGE to SGD",
+                candidate_policy="full pair uses actual endpoint only for alpha=0 or 1; policy pair uses actual endpoint at scale 1")
+        return metadata
 
     @staticmethod
     def _summarize(stats):
@@ -203,6 +210,16 @@ class TrainingDiagnostics:
         step, update_step = int(before.step), int(after.step)
         if update_step != step + 1:
             raise ValueError("Diagnostics require exactly one actual completed update")
+        alpha = None
+        if self.trajectory_method == "sage_policy":
+            from src.methods.sage_policy import PolicyState, policy_alpha
+            if (not isinstance(before.method_state, PolicyState)
+                    or not isinstance(after.method_state, PolicyState)
+                    or int(before.method_state.updates) != step
+                    or int(after.method_state.updates) != update_step):
+                raise ValueError("Diagnostic policy phase does not match the real update")
+            alpha = float(jax.device_get(policy_alpha(
+                self.method.mode, before.method_state, self.method.alternating_first)))
         source_id = context.get("batch_id", f"training_update_{update_step}")
         base = {"step": step, "update_step": update_step, "source_batch_id": source_id,
                 "trajectory_method": self.trajectory_method, "reference": self.reference_name}
@@ -218,6 +235,8 @@ class TrainingDiagnostics:
         if self.config.update_check:
             replay = self._replay(before.params, batch, before.model_state, before.method_state, rng_key)
             expected = stats.sage if self.trajectory_method == "sage" else stats.sgd
+            if alpha is not None:
+                expected = self._policy_direction(stats, alpha)
             errors = self._update_errors(before, after, replay, expected, stats.model_state, learning_rate)
             rows.append(("diagnostic_update", {**base, "learning_rate": learning_rate, **summary, **errors}))
 
@@ -228,9 +247,16 @@ class TrainingDiagnostics:
             for name, mask, gain in objectives:
                 initial = jnp.sum(jnp.where(mask, stats.losses, 0.)) / jnp.sum(mask)
                 for scale in self.config.lr_scales:
-                    row = self._paired_row(before, after, batch, mask, stats, scale, learning_rate, initial, gain)
+                    row = self._paired_row(before, after, batch, mask, stats, scale, learning_rate, initial, gain,
+                                           actual_alpha=alpha)
                     rows.append(("diagnostic_paired", {**common, "objective": name,
                                  "selected_count": jnp.sum(mask), **row}))
+                    if alpha is not None:
+                        rows.append(("diagnostic_policy", {**base, "policy_mode": self.method.mode,
+                            "policy_alpha": alpha, "objective": name, "objective_mode": self.objective_mode,
+                            "target_batch_id": source_id,
+                            **self._policy_row(before, after, batch, mask, stats, scale,
+                                               learning_rate, initial, gain, alpha)}))
 
         if self.config.transfer:
             source_indices = set(context.get("sample_indices", ()))
@@ -240,25 +266,56 @@ class TrainingDiagnostics:
                 gain = self._projection(gradient, correction)
                 overlap = len(source_indices.intersection(item.indices)) if "sample_indices" in context else None
                 for scale in self.config.lr_scales:
-                    row = self._paired_row(before, after, item.batch, mask, stats, scale, learning_rate, initial, gain)
+                    row = self._paired_row(before, after, item.batch, mask, stats, scale, learning_rate, initial, gain,
+                                           actual_alpha=alpha)
                     rows.append(("diagnostic_transfer", {**common, "target_batch_id": item.identity,
                                  "overlap_sample_count": overlap, "selected_count": jnp.sum(mask),
                                  "transfer_difference": gain - summary["reference_delta"], **row}))
+                    if alpha is not None:
+                        rows.append(("diagnostic_policy", {**base, "policy_mode": self.method.mode,
+                            "policy_alpha": alpha, "objective": "training_audit_ce",
+                            "objective_mode": self.objective_mode, "target_batch_id": item.identity,
+                            **self._policy_row(before, after, item.batch, mask, stats, scale,
+                                               learning_rate, initial, gain, alpha)}))
         # This transfer contains scalars/strings only; parameter arrays stay on device.
         host = jax.device_get([row for _, row in rows])
         return [(stream, {k: np.asarray(v).item() if isinstance(v, (np.ndarray, np.generic)) else v
                           for k, v in row.items()}) for (stream, _), row in zip(rows, host)]
 
-    def _paired_row(self, before, after, batch, mask, stats, scale, learning_rate, initial, gain):
+    @staticmethod
+    def _policy_direction(stats, alpha):
+        if alpha == 0.:
+            return stats.sgd
+        if alpha == 1.:
+            return stats.sage
+        return jax.tree_util.tree_map(lambda d, s: .5 * (d + s), stats.sgd, stats.sage)
+
+    def _policy_row(self, before, after, batch, mask, stats, scale, learning_rate, initial, gain, alpha):
+        """Actual-policy evidence is separate from the full-SAGE counterfactual."""
+        eta = learning_rate * scale
+        pd = self._candidate(before.params, stats.sgd, eta)
+        pp = (after.params if scale == 1. else self._candidate(
+            before.params, self._policy_direction(stats, alpha), eta))
+        jd = self._objective(pd, batch, before.model_state, mask)
+        jp = self._objective(pp, batch, before.model_state, mask)
+        difference, actual_gain = jp - jd, alpha * gain
+        return dict(lr_scale=scale, probe_lr=eta, j_initial=initial, j_sgd=jd, j_policy=jp,
+            difference=difference, objective_gain=actual_gain,
+            first_order_residual=difference / eta + actual_gain if eta > 0 else None,
+            actual_update_in_pair=scale == 1.,
+            finite=jnp.all(jnp.isfinite(jnp.stack([initial, jd, jp, actual_gain]))))
+
+    def _paired_row(self, before, after, batch, mask, stats, scale, learning_rate, initial, gain,
+                    *, actual_alpha=None):
         eta = learning_rate * scale
         pd = self._candidate(before.params, stats.sgd, eta)
         ps = self._candidate(before.params, stats.sage, eta)
         # The base-rate comparison includes the ORIGINAL compiled step's result.
         # If implementation differs from independent AD, H and its residual expose
         # that mismatch instead of silently testing two reconstructed updates.
-        actual = scale == 1.
+        actual = scale == 1. and (actual_alpha is None or actual_alpha in (0., 1.))
         if actual:
-            if self.trajectory_method == "sage":
+            if self.trajectory_method == "sage" or actual_alpha == 1.:
                 ps = after.params
             else:
                 pd = after.params

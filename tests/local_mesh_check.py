@@ -72,7 +72,31 @@ def main():
     row = next(row for stream, row in rows if stream == "diagnostic_update")
     assert row["direction_relative_error"] < 2e-5, row
     assert row["model_state_max_abs_error"] < 2e-6, row
-    print("PASS: two-device global BN, reference/error count, JVP scores, bounded-memory probes, momentum/cosine/L2 and weighted updates match full Jacobian")
+    # Opt-in policies must preserve global BN and the same original-B algebra.
+    # Compare against independent dense SGD/SAGE/DTV rounds, including both
+    # branches of the alternating conditional on a replicated policy counter.
+    for mode, first in (("continuous", "sgd"), ("alternating", "sgd"),
+                        ("alternating", "sage"), ("half", "sgd")):
+        for reference in ("loss", "error"):
+            method = create_method("sage_policy", policy_mode=mode,
+                reference_name=reference, gradient_backend="jvp", alternating_first=first)
+            trainer = LocalMeshTrainer(task, method, make_updater(TrainingConfig(learning_rate=.01)),
+                                       local_mesh(jax.local_devices()))
+            actual = jax.device_put(initial._replace(method_state=method.initial_state()), trainer.replicated)
+            expected = initial
+            compiled = trainer.compile_step()
+            for t in range(3):
+                selected = {"continuous": "sage", "half": "dtv",
+                            "alternating": "sage" if (t + int(first == "sage")) % 2 else "sgd"}[mode]
+                baseline = Trainer(task, create_method(selected, reference_name=reference,
+                    gradient_backend="audit"), trainer.updater)
+                expected, _ = baseline.compile_step()(expected, batch, jax.random.key(t))
+                actual, _ = compiled(actual, sharded_batch, jax.random.key(t))
+                for a, b in zip(jax.tree_util.tree_leaves(expected),
+                                jax.tree_util.tree_leaves(actual._replace(method_state=None))):
+                    np.testing.assert_allclose(a, b, rtol=2e-5, atol=2e-6)
+                assert int(actual.method_state.updates) == t + 1
+    print("PASS: two-device global BN, full-gradient oracle, legacy updates and all SAGE policies")
 
 
 if __name__ == "__main__":

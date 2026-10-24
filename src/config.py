@@ -6,7 +6,7 @@ from pathlib import Path
 import tomllib
 
 
-METHODS = ("sgd", "sage", "sage_loo", "dtv", "dtv_loo", "random_flip")
+METHODS = ("sgd", "sage", "sage_loo", "dtv", "dtv_loo", "random_flip", "sage_policy")
 REFERENCES = ("loss", "error")
 DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000}
 INATURALIST_PREPARED_DIR = "../data/inaturalist2021_full_t140000_v20000_s42"
@@ -35,6 +35,8 @@ class ModelConfig:
 class MethodConfig:
     name: str = "sgd"
     flip_probability: float = 0.25
+    policy_mode: str = "continuous"
+    alternating_first: str = "sgd"
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,15 @@ class RunConfig:
             raise ValueError("seed must be an integer in [0, 2**32)")
         if self.method.name not in METHODS:
             raise ValueError(f"Unknown method: {self.method.name}")
+        if self.method.policy_mode not in ("continuous", "alternating", "half"):
+            raise ValueError("policy_mode must be continuous, alternating or half")
+        if self.method.name != "sage_policy" and self.method.policy_mode != "continuous":
+            raise ValueError("Nondefault policy_mode requires method=sage_policy")
+        if self.method.alternating_first not in ("sgd", "sage"):
+            raise ValueError("alternating_first must be sgd or sage")
+        if self.method.alternating_first != "sgd" and not (
+                self.method.name == "sage_policy" and self.method.policy_mode == "alternating"):
+            raise ValueError("A nondefault alternating_first requires the alternating SAGE policy")
         if self.reference.name not in REFERENCES:
             raise ValueError(f"Unknown reference: {self.reference.name}")
         if not 0 <= self.method.flip_probability <= 1:
@@ -232,7 +243,7 @@ class RunConfig:
         if d.enabled:
             if not (d.update_check or d.paired_loss or d.transfer):
                 raise ValueError("Enable at least one diagnostic check")
-            if self.method.name not in ("sgd", "sage"):
+            if self.method.name not in ("sgd", "sage", "sage_policy"):
                 raise ValueError("Real-update diagnostics cover SGD and full common-reference SAGE only")
             if self.training.momentum != 0 or self.training.l2_coefficient != 0:
                 raise ValueError("Real-update diagnostics require momentum=0 and l2_coefficient=0")

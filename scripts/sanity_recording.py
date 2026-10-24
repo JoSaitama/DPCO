@@ -64,7 +64,9 @@ def exercise(output_root, config_path, enable_probes):
     state = TrainState({"w": jnp.zeros((1, classes)).at[0, 1].set(1.),
         "b": jnp.full(classes, -30.).at[:2].set(0.)})
     trainer = Trainer(task, create_method(config.method.name, reference_name=config.reference.name,
-                                         flip_probability=config.method.flip_probability),
+                                         flip_probability=config.method.flip_probability,
+                                         policy_mode=config.method.policy_mode,
+                                         alternating_first=config.method.alternating_first),
                       make_updater(config.training))
     evaluation = EvaluationSpec(task, lambda: iter([source.batch]), 3, "deterministic_linear")
     def audit(p):

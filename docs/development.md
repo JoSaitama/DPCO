@@ -1,5 +1,60 @@
 # Development record
 
+## 2026-10-24: configurable first method for alternating policies
+
+- User requested --alternating-first sgd|sage for both sage_l_alternating and
+  sage_e_alternating, default sgd. Both shell suites forward the option through
+  the coordinator and TPU child. A mixed-method suite applies it only to its
+  alternating jobs; legacy SGD/SAGE and continuous/half configs remain unchanged.
+- Store method.alternating_first in the effective config. Compute alpha from the
+  absolute checkpointed policy counter plus the fixed first-method offset, using
+  one shared function for real updates and diagnostics. Warmup, probes and resume
+  do not reset phase. Changing the first method on resume fails config validation.
+- Missing historical fields imply sgd without rewriting metadata. Preserve default
+  run labels; nondefault SAGE-first jobs add _first_sage to directory/status labels.
+  Existing per-step alpha/executed-method records expose order without new CSV or
+  TSV columns. Diagnostic metadata also records the configured first method.
+- Comments and protocol updates are English. No commit, push or server TPU launch.
+- Validation: all148 CPU/offline tests passed. Both first-method choices were
+  checked for loss/error references, mixed-method suite parent/child forwarding,
+  unique status identities, actual diagnostic gains, odd-step resume, rejection
+  of changed resume phase, legacy missing-field compatibility, tiny-ResNet entry
+  and two-device global BN. Legacy pre-edit trajectories remain bitwise equal;
+  whitespace, English-only and shell syntax checks passed. TPU validation remains
+  a user-run server smoke, not a claim from these CPU checks.
+
+## 2026-10-24: explicitly selected SAGE policy experiments
+
+- User authorized continuous/alternating/half experiments after requiring legacy
+  SGD/SAGE defaults, commands and arithmetic to remain unchanged. This supersedes
+  the earlier no-alternation scope only for the explicitly selected policy modes.
+- Added a separate SAGEPolicy method. Continuous delegates to SAGE, half delegates
+  to DTV's original-B filter, and alternating executes SGD/SAGE from the first SGD
+  update through a real lax.cond. No loop method-name dispatch, duplicate complete
+  directions, new normalization, data changes or optimizer defaults are introduced.
+- Save the policy update counter in method_state. Warmup/replay discard their state;
+  restore validates the counter against the global step. Keep legacy metadata
+  compatible by interpreting a missing policy_mode as continuous without rewriting.
+- Extend both shared suites with explicit sage_l/e_continuous/alternating/half
+  aliases, unique result labels and policy-aware start/end status values. Original
+  runs create no policy records; policy_steps uses the shared buffered recorder.
+- Independent diagnostics reconstruct the active direction, while legacy paired
+  streams continue to mean full SAGE versus SGD. New diagnostic_policy rows compare
+  the active direction against SGD and distinguish real scale1 endpoints from
+  hypothetical full/half candidates. Legacy theorem probes remain full-SAGE-only.
+- Code, comments and development records are English. Actual TPU smoke/formal jobs
+  must still use the nohup TPU suites; local CPU checks are implementation tests.
+  Git commits and pushes remain manual user actions.
+- Validation: all 144 CPU/offline tests passed with JAX0.8.1/Flax0.12.0. Coverage
+  includes dense gradient oracles, empty/all/mixed error references, global BN on
+  two CPU devices, runtime branch execution markers, all three policies through
+  the tiny-ResNet real entry, odd-phase resume without duplicate rows, diagnostics
+  on/off equality, zero-LR handling and both suite parent/child round trips.
+  Four pre-edit legacy SGD/SAGE loss/error trajectories of six updates matched
+  all saved parameter/model states and metrics exactly after editing. Core SGD,
+  SAGE, trainer, updater, reference and alignment files have no diff. English-only,
+  shell syntax and whitespace checks passed. No TPU run, Git commit or push.
+
 ## 2026-10-22: optional diagnostics on real training updates
 
 - User authorized implementation of the three agreed early-reversal checks. Keep

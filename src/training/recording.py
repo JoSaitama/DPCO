@@ -30,6 +30,11 @@ DIAGNOSTIC_PAIR = (*DIAGNOSTIC_BASE, "objective_mode", "learning_rate", "referen
     "j_sgd", "j_sage", "difference", "difference_over_lr", "objective_gain",
     "first_order_residual", "actual_update_in_pair", "finite")
 SCHEMAS.update({
+    "policy_steps": ("step", "policy_mode", "policy_alpha", "executed_method", "reference"),
+    "diagnostic_policy": (*DIAGNOSTIC_BASE, "policy_mode", "policy_alpha", "objective",
+        "objective_mode", "target_batch_id", "lr_scale", "probe_lr", "j_initial",
+        "j_sgd", "j_policy", "difference", "objective_gain", "first_order_residual",
+        "actual_update_in_pair", "finite"),
     "diagnostic_context": (*DIAGNOSTIC_BASE, "learning_rate", "cumulative_eta_before",
         "objective_mode", "source_context_json"),
     "diagnostic_update": (*DIAGNOSTIC_BASE, "learning_rate", "valid_batch_size", "error_count",

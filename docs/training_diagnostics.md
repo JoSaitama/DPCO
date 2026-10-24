@@ -181,3 +181,40 @@ Interpretation order: examine Check1 residuals first; then source H versus its
 objective gain; then target H/projections/overlap. Retain unfavorable rows and all
 scales. Repeated scales/checkpoints are not independent expectation samples. More
 sampled source batches at one frozen state would be a separate sampling experiment.
+
+## Opt-in policy trajectories
+
+The continuous/alternating/half aliases use method=sage_policy. Original SGD/SAGE
+diagnostic records and default computation paths retain their existing semantics.
+On policy trajectories, diagnostic_update compares the real update to the
+independently reconstructed `Gd + alpha*(Gs-Gd)` direction. The recorded
+reference_delta and norm_sage_sq still describe FULL SAGE, not alpha-scaled SAGE.
+
+`policy_steps.csv` stores step, policy_mode, policy_alpha, executed_method and
+reference for each real update. Its step is the completed update number. The
+policy counter in TrainState.method_state must equal TrainState.step and is saved
+with the normal checkpoint; observation/replay and compile warmup never advance it.
+`--alternating-first sgd|sage` selects the initial phase (default sgd). The observer
+uses the same configured offset at every state, not a new first step at each node.
+Metadata records alternating_first; resume configuration must keep it unchanged.
+Older metadata without this field means the original SGD-first convention.
+
+The existing diagnostic_paired/transfer streams always compare full SAGE to SGD.
+At scale1, the real endpoint is included only if alpha is exactly0 or1. For half,
+both endpoints of that full comparison are hypothetical and actual_update_in_pair
+is false. This avoids relabeling a half step as an original Theorem2 experiment.
+
+The additional `diagnostic_policy.csv` compares the active policy to SGD on each
+enabled source objective and training-audit target. It records policy mode/alpha,
+target identity, LR scale, initial/SGD/policy CE, policy-minus-SGD difference,
+alpha-scaled objective_gain, first_order_residual and finite/actual flags. Source
+and audit objectives use the same frozen inputs/masks/train-BN convention as the
+full pair. Scale1 includes the REAL after-parameters; smaller scales reconstruct
+the scheduled alpha at the same before-state, not another alternation phase.
+This stream is emitted only for policy jobs and follows the existing individual
+paired/transfer switches and shared CSV buffering/recovery.
+
+SGD policy rounds have zero theoretical correction gain; numerical differences
+between the real fused SGD endpoint and independent reconstruction may remain.
+Do not treat such differences as a measured nonzero SAGE correction. Policy
+diagnostics are overhead and are disabled independently of the training policy.

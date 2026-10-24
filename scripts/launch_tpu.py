@@ -34,6 +34,7 @@ def plan_job(args, path, config, method):
                "--seed", str(config.seed)]
     for flag, value in (("--steps", args.steps), ("--batch-size", args.batch_size),
                         ("--method", method), ("--dataset", args.dataset),
+                        ("--alternating-first", args.alternating_first),
                         ("--model", args.model), ("--data-mode", args.data_mode),
                         ("--data-dir", args.data_dir),
                         ("--l2-coefficient", args.l2_coefficient), ("--momentum", args.momentum),
@@ -126,6 +127,7 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
         for method in methods:
             config = resolve_config(path, mode=args.mode, steps=args.steps, batch_size=args.batch_size,
                 seed=seed, method=method, dataset=args.dataset, model=args.model, data_mode=args.data_mode,
+                alternating_first=args.alternating_first,
                 data_dir=args.data_dir,
                 l2_coefficient=args.l2_coefficient, momentum=args.momentum, nesterov=args.nesterov,
                 learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
@@ -139,6 +141,9 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
         plans = [{"command": command, "stdout": str(paths.logs / "stdout.log"),
             "mode": args.mode, "backend": "tpu_only", "worker": "worker0_only", "wait": wait,
             "seed": config.seed, "method": config.method.name, "reference": config.reference.name,
+            "policy_mode": config.method.policy_mode if config.method.name == "sage_policy" else None,
+            "alternating_first": config.method.alternating_first if config.method.name == "sage_policy"
+                and config.method.policy_mode == "alternating" else None,
             "dataset": config.data.name, "num_classes": config.data.num_classes,
             "model": config.model.name, "data_mode": config.data.mode,
             "data_dir": str(absolute_path(config.data.prepared_dir, ROOT).resolve()),

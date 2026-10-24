@@ -53,14 +53,14 @@ def run_sanity(config, steps):
     def expected_direction(params, batch, method_name, reference_name):
         gradients, errors, valid = analytic_batch(params, batch)
         weights = np.ones(len(valid), dtype=np.float32)
-        if method_name == "sage":
+        if method_name in ("sage", "dtv"):
             selected = errors if reference_name == "error" else valid
             if selected.any():
                 reference = {name: leaf[selected].mean(axis=0)
                              for name, leaf in gradients.items()}
                 scores = sum((leaf * reference[name]).reshape(len(valid), -1).sum(axis=1)
                              for name, leaf in gradients.items())
-                weights = np.where(scores < 0., -1., 1.)
+                weights = np.where(scores < 0., 0. if method_name == "dtv" else -1., 1.)
         weights = np.where(valid, weights, 0.)
         return {
             name: (leaf * weights.reshape((len(valid),) + (1,) * (leaf.ndim - 1))).sum(axis=0)
@@ -123,14 +123,22 @@ def run_sanity(config, steps):
     )
     print("PASS: empty-error SGD fallback, all-error E/L equivalence, and zero-score retention")
 
-    method = create_method(config.method.name, reference_name=config.reference.name)
+    method = create_method(config.method.name, reference_name=config.reference.name,
+                           policy_mode=config.method.policy_mode, alternating_first=config.method.alternating_first)
     updater = make_updater(config.training)
     trainer = Trainer(task, method, updater)
     compiled_step = jax.jit(trainer.step)
     state = TrainState(params, optimizer_state=updater.init(params))
+    if config.method.name == "sage_policy":
+        state = state._replace(method_state=method.initial_state())
     velocity = {name: np.zeros_like(value) for name, value in params.items()}
     for step in range(steps):
-        direction = expected_direction(state.params, batch, config.method.name, config.reference.name)
+        effective = config.method.name
+        if effective == "sage_policy":
+            effective = {"continuous": "sage", "half": "dtv",
+                         "alternating": "sage" if (step + int(config.method.alternating_first == "sage")) % 2
+                         else "sgd"}[config.method.policy_mode]
+        direction = expected_direction(state.params, batch, effective, config.reference.name)
         direction = {name: direction[name] + (
             config.training.l2_coefficient * np.asarray(value) if value.ndim > 1 else 0.)
             for name, value in state.params.items()}

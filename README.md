@@ -34,6 +34,58 @@ batches. Enable with `--diagnostics` through either shell suite; default is off.
 The observer preserves the selected optimizer and original compiled training step.
 Its switches are independent of the older fixed-batch theorem probes.
 
+## Opt-in continuous, alternating and half SAGE
+
+Existing `sgd`, `sage_l` and `sage_e` commands keep their original implementations.
+New method aliases select a separate policy wrapper:
+
+| Loss reference | Error reference | Correction strength alpha |
+|---|---|---|
+| `sage_l_continuous` | `sage_e_continuous` | 1 on every update |
+| `sage_l_alternating` | `sage_e_alternating` | 0, 1, 0, 1, ... by default; first method is configurable |
+| `sage_l_half` | `sage_e_half` | 0.5 on every update |
+
+The direction is `Gd + alpha * (Gs - Gd)` before the common learning-rate update.
+Half means filtering negative alignment with the original B denominator (the
+existing DTV calculation), not half the learning rate or separate complete SGD/SAGE
+computations. Half still needs reference/alignment work; half strength does not
+promise half the wall time.
+Alternating uses a compiled conditional: SGD rounds skip reference/alignment work.
+Each round commits one model state and one parameter update. The checkpointed
+policy counter preserves phase on resume, including resumes after an odd update.
+
+For either alternating alias, `--alternating-first sgd` (default) selects
+SGD -> SAGE -> SGD, while `--alternating-first sage` selects SAGE -> SGD -> SAGE.
+This suite option applies only to alternating jobs; baseline, continuous and half
+jobs in the same grid are unchanged. It reaches both the nohup parent and child.
+The effective config stores method.alternating_first; changing it on resume is
+rejected. Runs using the nondefault SAGE-first order add `_first_sage` to their
+directory label and status method value. Per-step policy_alpha/executed_method
+records show the actual order, and diagnostic metadata records its first method.
+
+An example server smoke suite (real TPU through the existing nohup launcher):
+
+```bash
+nohup ./run_sage_suite.sh --mode smoke --steps 5 --batch-size 16 \
+  --methods sage_l_continuous sage_l_alternating sage_l_half sgd --seed 5 \
+  --no-theorem-probes --diagnostics --diagnostic-steps 0 1 2 3 4 \
+  --no-diagnostic-transfer --diagnostic-lr-scales 1 0.5 \
+  >/dev/null 2>&1 < /dev/null &
+```
+
+Both ImageNet and iNaturalist suites accept these aliases. For theory checks keep
+momentum, Nesterov and L2 off, with the same constant LR/data/seed/budget for all
+methods. Policy jobs use distinct run labels and write `policy_steps.csv`; normal
+training JSON includes policy_mode, policy_alpha and executed_method. The shared
+status TSV keeps its existing start/end-only schema and identifies policy mode
+in its method value. Original jobs create no policy CSV.
+
+Use `--diagnostics` for the new modes. Legacy `--theorem-probes` remains restricted
+to the original full SAGE method and is not silently reinterpreted. Full-SAGE
+counterfactuals remain in diagnostic_paired/transfer; diagnostic_policy records
+the active policy versus SGD, with alpha-scaled objective gain and the real policy
+endpoint at scale 1. See [diagnostic semantics](docs/training_diagnostics.md).
+
 ## Start on worker0
 
 Use a separate Python 3.11+ environment. Do not reuse another project's dependencies:

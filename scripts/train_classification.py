@@ -59,7 +59,10 @@ def run(args, config, devices, *, status):
         train_task = ClassificationTask(model_adapter(model, train=True), config.data.num_classes)
         eval_task = ClassificationTask(model_adapter(model, train=False), config.data.num_classes)
         method = create_method(config.method.name, reference_name=config.reference.name,
-            flip_probability=config.method.flip_probability, gradient_backend="jvp")
+            flip_probability=config.method.flip_probability, gradient_backend="jvp",
+            policy_mode=config.method.policy_mode, alternating_first=config.method.alternating_first)
+        if config.method.name == "sage_policy":
+            state = state._replace(method_state=jax.device_put(method.initial_state(), replicated))
         trainer = LocalMeshTrainer(train_task, method, updater, mesh)
         source = ImageBatchSource(images, batch_size, image_size, config.seed)
         diagnostics = None
@@ -138,6 +141,7 @@ def main():
     config = resolve_config(absolute_path(args.config, ROOT), mode=args.mode,
                             steps=args.steps, batch_size=args.batch_size, seed=args.seed,
                             method=args.method, dataset=args.dataset, model=args.model,
+                            alternating_first=args.alternating_first,
                             data_mode=args.data_mode, data_dir=args.data_dir,
                             l2_coefficient=args.l2_coefficient,
                             momentum=args.momentum, nesterov=args.nesterov,

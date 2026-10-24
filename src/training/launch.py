@@ -9,6 +9,9 @@ from src.config import DATASET_CLASSES, INATURALIST_PREPARED_DIR, MethodConfig, 
 
 EXPERIMENT_METHODS = {"sgd": ("sgd", "loss"), "sage_e": ("sage", "error"),
                       "sage_l": ("sage", "loss")}
+POLICY_METHODS = {f"sage_{reference}_{mode}": (signal, mode)
+                  for reference, signal in (("l", "loss"), ("e", "error"))
+                  for mode in ("continuous", "alternating", "half")}
 
 
 def add_overrides(parser, *, multiple=False):
@@ -17,11 +20,13 @@ def add_overrides(parser, *, multiple=False):
         parser.add_argument("--seed", "--seeds", dest="seeds", nargs="+", type=int,
                             help="One or more seeds; omission honors the selected config")
         parser.add_argument("--method", "--methods", dest="methods", nargs="+",
-                            choices=tuple(EXPERIMENT_METHODS))
+                            choices=(*EXPERIMENT_METHODS, *POLICY_METHODS))
     else:
         parser.add_argument("--seed", type=int)
-        parser.add_argument("--method", choices=tuple(EXPERIMENT_METHODS))
+        parser.add_argument("--method", choices=(*EXPERIMENT_METHODS, *POLICY_METHODS))
     parser.add_argument("--dataset", choices=tuple(DATASET_CLASSES))
+    parser.add_argument("--alternating-first", choices=("sgd", "sage"),
+                        help="First update of alternating SAGE policies; default sgd. Other methods in a suite are unchanged.")
     parser.add_argument("--data-dir", help="Prepared data location, relative to the repository or absolute; iNaturalist uses the subset directory itself")
     parser.add_argument("--model", choices=("resnet50", "resnet101"))
     parser.add_argument("--data-mode", "--datamode", dest="data_mode",
@@ -83,6 +88,7 @@ def diagnostic_cli_args(args):
 
 def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    method=None, dataset=None, model=None, data_mode=None, data_dir=None, l2_coefficient=None,
+                   alternating_first=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
                    min_learning_rate=None, checkpoint_every_steps=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
@@ -97,8 +103,20 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     if seed is not None:
         config = replace(config, seed=seed)
     if method is not None:
-        name, reference = EXPERIMENT_METHODS[method]
-        config = replace(config, method=MethodConfig(name), reference=ReferenceConfig(reference))
+        if method in POLICY_METHODS:
+            reference, policy_mode = POLICY_METHODS[method]
+            selected_method = MethodConfig("sage_policy", policy_mode=policy_mode)
+        else:
+            name, reference = EXPERIMENT_METHODS[method]
+            selected_method = MethodConfig(name)
+        config = replace(config, method=selected_method, reference=ReferenceConfig(reference))
+    if alternating_first is not None:
+        if alternating_first not in ("sgd", "sage"):
+            raise ValueError("alternating_first must be sgd or sage")
+        # A common suite option applies only to its alternating jobs. Preserve
+        # baseline/continuous/half configs and their identities exactly.
+        if config.method.name == "sage_policy" and config.method.policy_mode == "alternating":
+            config = replace(config, method=replace(config.method, alternating_first=alternating_first))
     if dataset is not None:
         directory = config.data.prepared_dir
         if (dataset == "inaturalist2021") != (config.data.name == "inaturalist2021"):

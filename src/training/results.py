@@ -45,6 +45,10 @@ def make_run_name(config, *, timestamp=None):
     """Use one timezone-aware timestamp across all three experiment directories."""
     timestamp = timestamp or datetime.now().astimezone()
     label = config.method.name
+    if label == "sage_policy":
+        label = "sage_" + ("e" if config.reference.name == "error" else "l") + "_" + config.method.policy_mode
+        if config.method.policy_mode == "alternating" and config.method.alternating_first == "sage":
+            label += "_first_sage"
     if label in ("sage", "sage_loo", "dtv", "dtv_loo"):
         label = label.replace("_loo", "") + ("_e" if config.reference.name == "error" else "_l") + ("_loo" if label.endswith("_loo") else "")
     parts = (config.data.name, config.data.mode, config.model.name, label,

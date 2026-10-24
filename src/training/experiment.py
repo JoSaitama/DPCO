@@ -78,6 +78,8 @@ class ExperimentRunner:
             # Legacy runs implicitly had diagnostics disabled. Do not enable an
             # observer during resume or reinterpret their existing CSV records.
             stored_config.setdefault("diagnostics", json.loads(json.dumps(asdict(DiagnosticConfig()))))
+            stored_config["method"].setdefault("policy_mode", "continuous")
+            stored_config["method"].setdefault("alternating_first", "sgd")
             if stored_config != json.loads(json.dumps(config.as_dict())):
                 self.recorder.close()
                 raise ValueError("Resume configuration differs from the original run")
@@ -94,11 +96,18 @@ class ExperimentRunner:
     def _run(self, initial_state, *, resume_slot):
         c, recorder = self.config, self.recorder
         state, samples_seen, elapsed_offset = initial_state, 0, 0.
+        if c.method.name == "sage_policy" and state.method_state is None:
+            state = state._replace(method_state=self.trainer.method.initial_state())
         cumulative = dict(cumulative_reference_gain=0., cumulative_eta=0., cumulative_eta_sq=0.)
         best, best_step, last_eval = None, None, None
         if self.resume:
             saved = self.store.load(resume_slot)
             state, samples_seen = saved["train_state"], saved["samples_seen"]
+            if c.method.name == "sage_policy":
+                from src.methods.sage_policy import PolicyState
+                if (not isinstance(state.method_state, PolicyState)
+                        or int(state.method_state.updates) != int(state.step)):
+                    raise ValueError("Policy checkpoint phase does not match completed updates")
             if state.optimizer_state is None and getattr(self.trainer.updater, "momentum", 0) != 0:
                 raise ValueError("Momentum checkpoint is missing optimizer state")
             self.source.restore(saved["source_state"])
@@ -216,6 +225,12 @@ class ExperimentRunner:
                         valid_batch_size=values["valid_batch_size"],
                         train_ce=values["train_ce"], train_top1=values["train_top1"], elapsed_wall_s=stamp)
                     recorder.record("train_steps", **record)
+                    policy_fields = {}
+                    if c.method.name == "sage_policy":
+                        alpha = float(values["policy_alpha"])
+                        policy_fields = dict(policy_mode=c.method.policy_mode, policy_alpha=alpha,
+                            executed_method={0.: "sgd", .5: "half_sage", 1.: "sage"}[alpha])
+                        recorder.record("policy_steps", step=row_step, reference=c.reference.name, **policy_fields)
                     if not values["parameters_finite"]:
                         raise FloatingPointError(f"Non-finite model parameters at step {row_step}")
                     if not all(math.isfinite(float(values[key])) for key in ("train_ce", "train_top1")):
@@ -238,7 +253,7 @@ class ExperimentRunner:
                         recorder.record("theorem3", step=row_step, phase="train", probe_id="",
                                         delta=values.get("theory_delta"), **cumulative)
                     if self.log_schedule.due(row_step, seen):
-                        recorder.log("train", **record)
+                        recorder.log("train", **record, **policy_fields)
                 pending.clear()
                 timing("train_window", duration, window_steps=window_steps, window_samples=window_samples,
                     steps_per_s=window_steps / duration, samples_per_s=window_samples / duration)
