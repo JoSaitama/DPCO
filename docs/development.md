@@ -1,5 +1,33 @@
 # Development record
 
+## 2026-10-24: independent finite CPU theory/LR validation
+
+- Added run_sage_theory_suite.sh, scripts/validate_sage_theory.py and
+  src/probes/theory_validation.py. Original production entry points, methods,
+  policy modes, schedulers, optimizer settings and checkpoint logic are untouched.
+- Real transitions use the existing ClassificationTask, JVP SAGE/SGD, Trainer
+  and SGDUpdate on a fixed no-bias single-logit linear classifier. NumPy float64
+  analytic/dense gradients only observe the float32 numerical path.
+- Only shared API change: optional instance-level schemas in RunRecorder. The
+  default registry/CSV headers/checkpoint cursors are unchanged. Three private
+  streams distinguish real steps, same-state loss pairs and conditional moments.
+- Separate data/init/training/probe random roles preserve shared batch sequences
+  and probe-count independence. Full-target smoothness, cumulative descent and
+  second-order costs use actual pre-update states; raw numerical residuals remain.
+- Reproduced all three requested analytic cases, including adverse outcomes:
+  update16 quadratic crossover, E target-ascent counterexample, and exhaustive
+  nine-batch moments versus independent MC. No new gate, scaling or reference.
+- Ran a finite12-job CPU grid: seed5, LR.01/.1, constant/cosine,60 updates/B8,
+ 128 probes at states0/5/20/59. All720 updates completed; all cumulative bound
+  slacks were positive (minimum1.8773e-6), not just within the pass tolerance.
+  All runs shared the same ordered batch-index SHA256. Results include a losing
+  constant-LR SAGE-L configuration; no SAGE-win acceptance condition was used.
+- All160 CPU/offline regression tests passed, covering existing diagnostics,
+  checkpoint/resume and policy paths as well as the independent suite. Additional
+  final checks cover both signs of the quadratic identity and private-schema
+  rewind and injected-failure retention/continuation. Reproduction commands, actual CE table and limits are in
+  docs/theory_validation.md. No TPU/server job, data download or commit/push.
+
 ## 2026-10-24: optional runs without model checkpoints
 
 - Added default-on checkpoints.enabled and shared --checkpoints/--no-checkpoints

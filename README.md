@@ -5,6 +5,12 @@ separation. Repository code, comments and documentation use English.
 
 ## Current stage
 
+An independent [CPU theory/LR validation suite](docs/theory_validation.md) tests
+the original SGD/SAGE-E/SAGE-L on smooth synthetic classification data, with
+analytic counterexamples, conditional moments and full-target cumulative bounds.
+Run `./run_sage_theory_suite.sh --dry-run` to inspect its grid. It does not launch
+TPU training, download data, save checkpoints or change the production/policy paths.
+
 The first real-device pipeline targets ImageNet-100, ResNet-50, and two sequential
 SGD/SAGE-E runs on node-ziao1 worker0. Worker1 remains idle and is not a peer. Later
 ImageNet-1K/ResNet-101 checks use the same adapters after first-stage validation.

@@ -108,16 +108,19 @@ class RunRecorder:
     so recording never triggers hidden JAX synchronization per field.
     """
 
-    def __init__(self, paths, *, metadata=None, console=True, resume=False, status=None):
+    def __init__(self, paths, *, metadata=None, console=True, resume=False, status=None, schemas=None):
         self.paths, self.console, self.status = paths, console, status
-        self.buffers = {name: [] for name in SCHEMAS}
-        self.row_counts = {name: 0 for name in SCHEMAS}
+        # Independent experiments may provide private streams without mutating
+        # the global registry or adding cursors to ordinary training runs.
+        self.schemas = SCHEMAS if schemas is None else dict(schemas)
+        self.buffers = {name: [] for name in self.schemas}
+        self.row_counts = {name: 0 for name in self.schemas}
         if not resume:
             atomic_json(paths.logs / "metadata.json", metadata or {})
         self.log_file = (paths.logs / "train.log").open("a", encoding="utf-8")
 
     def record(self, stream, **row):
-        fields = SCHEMAS[stream]
+        fields = self.schemas[stream]
         extra = set(row) - set(fields)
         if extra:
             raise ValueError(f"Unknown fields in {stream}: {sorted(extra)}")
@@ -140,7 +143,7 @@ class RunRecorder:
             path = self.paths.files / (stream + ".csv")
             new = not path.exists() or path.stat().st_size == 0
             with path.open("a", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=SCHEMAS[stream])
+                writer = csv.DictWriter(handle, fieldnames=self.schemas[stream])
                 if new:
                     writer.writeheader()
                 writer.writerows(rows)
@@ -151,7 +154,7 @@ class RunRecorder:
         """Keep exactly the flushed rows present when a checkpoint was written."""
         for rows in self.buffers.values():
             rows.clear()
-        for stream in SCHEMAS:
+        for stream in self.schemas:
             path = self.paths.files / (stream + ".csv")
             if not path.exists():
                 if cursors.get(stream, 0):
@@ -161,7 +164,7 @@ class RunRecorder:
             temporary = path.with_suffix(".csv.tmp")
             with path.open(newline="", encoding="utf-8") as source, temporary.open("w", newline="", encoding="utf-8") as destination:
                 reader = csv.DictReader(source)
-                writer = csv.DictWriter(destination, fieldnames=SCHEMAS[stream])
+                writer = csv.DictWriter(destination, fieldnames=self.schemas[stream])
                 writer.writeheader()
                 for _ in range(count):
                     row = next(reader, None)
