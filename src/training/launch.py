@@ -43,6 +43,8 @@ def add_overrides(parser, *, multiple=False):
                         help="Cosine floor, including zero; default 0")
     parser.add_argument("--checkpoint-every-steps", type=int,
                         help="Save the rolling latest checkpoint every N completed steps; default 100")
+    parser.add_argument("--checkpoints", action=argparse.BooleanOptionalAction, default=None,
+                        help="Save model/recovery checkpoints; --no-checkpoints disables all slots without disabling CSV/logs")
     evaluation = parser.add_mutually_exclusive_group()
     evaluation.add_argument("--eval-every-steps", type=int,
                             help="Run full configured validation every N completed updates")
@@ -90,7 +92,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    method=None, dataset=None, model=None, data_mode=None, data_dir=None, l2_coefficient=None,
                    alternating_first=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
-                   min_learning_rate=None, checkpoint_every_steps=None,
+                   min_learning_rate=None, checkpoint_every_steps=None, checkpoints=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
                    diagnostics=None, diagnostic_steps=None, diagnostic_update_check=None,
                    diagnostic_paired_loss=None, diagnostic_transfer=None, diagnostic_lr_scales=None,
@@ -143,6 +145,8 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     if checkpoint_every_steps is not None:
         config = replace(config, checkpoints=replace(config.checkpoints,
             latest_every_steps=checkpoint_every_steps))
+    if checkpoints is not None:
+        config = replace(config, checkpoints=replace(config.checkpoints, enabled=checkpoints))
     if eval_every_steps is not None:
         config = replace(config, evaluation=replace(config.evaluation,
             mode="steps", interval=eval_every_steps))

@@ -73,6 +73,7 @@ class EvaluationConfig:
 class CheckpointConfig:
     latest_every_steps: int = 100
     at_epoch_end: bool = False
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -212,6 +213,8 @@ class RunConfig:
         if not isinstance(self.results.root_dir, str) or not self.results.root_dir.strip():
             raise ValueError("results.root_dir must be a nonempty path")
         from src.training.schedules import validate_interval
+        if not isinstance(self.checkpoints.enabled, bool):
+            raise ValueError("checkpoints.enabled must be a boolean")
         validate_interval(self.logging.mode, self.logging.interval, ("steps", "percent"))
         validate_interval(self.evaluation.mode, self.evaluation.interval, ("steps", "epochs"))
         for value in (self.training.total_steps, self.logging.csv_flush_steps,

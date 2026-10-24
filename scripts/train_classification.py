@@ -148,8 +148,11 @@ def main():
                             learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
                             min_learning_rate=args.min_learning_rate,
                             checkpoint_every_steps=args.checkpoint_every_steps,
+                            checkpoints=args.checkpoints,
                             eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
                             **diagnostic_overrides(args))
+    if args.resume and not config.checkpoints.enabled:
+        parser.error("Resume requires checkpoints enabled; --no-checkpoints runs cannot be resumed")
     paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT).experiment(args.run_name)
     status = RunStatus(paths, config, mode=args.mode, resume=args.resume, attempt_id=args.attempt_id)
     with status.monitor():

@@ -202,9 +202,16 @@ Set `--checkpoint-every-steps 10` (or 100, etc.) to control the rolling latest
 recovery checkpoint. The positive integer overrides `[checkpoints]
 latest_every_steps`; its default is 100 unless a custom config sets another value.
 It is shared by all suite jobs and recorded in each effective configuration.
+Use `--no-checkpoints` to disable **all** model snapshots and the slot index,
+including initial, milestones, best, final and latest. Logs, metrics, diagnostics
+and completion status are still saved. This avoids checkpoint serialization and
+disk writes, but saves no trained model and provides no interruption recovery.
+`--checkpoints` re-enables saving; omission honors `[checkpoints] enabled`, whose
+default is `true`. An empty per-run `results/runs/` directory may still exist.
+Resume requires checkpoints enabled and a matching original configuration.
 This does not retain every periodic snapshot: initial/p25/p50/p75/final/best stay
 protected, and only obsolete unreferenced snapshots are deleted. Initial/final
-saves are mandatory; milestone and best saves remain independent of the interval.
+saves are mandatory while checkpointing is enabled; milestone and best saves remain independent of the interval.
 The order is full snapshot write/flush/fsync, atomic snapshot publication, atomic
 index publication, then deletion of old unreferenced snapshots. A write or index
 publication failure preserves the previous indexed recovery point. Extra transient

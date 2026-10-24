@@ -47,6 +47,8 @@ def plan_job(args, path, config, method):
             command.extend([flag, str(value)])
     if args.nesterov is not None:
         command.append("--nesterov" if args.nesterov else "--no-nesterov")
+    if args.checkpoints is not None:
+        command.append("--checkpoints" if args.checkpoints else "--no-checkpoints")
     command.extend(diagnostic_cli_args(args))
     if args.resume:
         command.extend(["--resume", "--resume-slot", args.resume_slot])
@@ -132,9 +134,12 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
                 l2_coefficient=args.l2_coefficient, momentum=args.momentum, nesterov=args.nesterov,
                 learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
                 min_learning_rate=args.min_learning_rate, checkpoint_every_steps=args.checkpoint_every_steps,
+                checkpoints=args.checkpoints,
                 eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
                 **diagnostic_overrides(args))
             jobs.append((config, method))
+    if args.resume and not jobs[0][0].checkpoints.enabled:
+        parser.error("Resume requires checkpoints enabled; --no-checkpoints runs cannot be resumed")
     wait = args.wait or len(jobs) > 1
     if args.dry_run:
         previews = [(config, *plan_job(args, path, config, method)) for config, method in jobs]
@@ -154,6 +159,7 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             "learning_rate": config.training.learning_rate, "lr_schedule": config.training.lr_schedule,
             "min_learning_rate": config.training.min_learning_rate,
             "checkpoint_every_steps": config.checkpoints.latest_every_steps,
+            "checkpoints_enabled": config.checkpoints.enabled,
             "evaluation_mode": config.evaluation.mode,
             "evaluation_interval": config.evaluation.interval,
             "diagnostics": config.as_dict()["diagnostics"],

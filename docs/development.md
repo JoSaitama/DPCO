@@ -1,5 +1,26 @@
 # Development record
 
+## 2026-10-24: optional runs without model checkpoints
+
+- Added default-on checkpoints.enabled and shared --checkpoints/--no-checkpoints
+  overrides through both shell suites, parent dry-run and TPU child. Existing
+  commands retain the original seven-slot save/retention behavior.
+- The disabled path exits before checkpoint cursor flush, data-source snapshot,
+  device serialization or snapshot/index writes. Training, evaluation, diagnostics,
+  per-update CSV buffering, lifecycle TSV and final summaries remain active.
+- Resume rejects disabled checkpointing before launch; legacy metadata without
+  enabled is interpreted as true without rewriting the stored configuration.
+- Formal study scope: ImageNet-100 / ResNet-50, seed5, constant LR0.05, 5,000
+  updates, B256, momentum/Nesterov/L2 off. Preserve source-paired, update-replay
+  and fixed-training-batch transfer diagnostics, including both alternating phases.
+- No automatic Git commit/push or server TPU launch.
+- Validation: all151 CPU/offline tests passed. Checkpoint-disabled runs produced
+  no snapshot/index or checkpoint timing rows, retained legacy and real-update
+  probe outputs, and matched enabled runs exactly in final state, data cursor
+  and per-update CE/top1. Both suites forwarded enable/disable to children, and
+  legacy enabled runs resumed without metadata rewriting. The full nine-job
+  LR0.05/T5000/B256 diagnostic launch plan passed dry-run with saving disabled.
+
 ## 2026-10-24: configurable first method for alternating policies
 
 - User requested --alternating-first sgd|sage for both sage_l_alternating and

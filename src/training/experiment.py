@@ -27,6 +27,8 @@ class ExperimentRunner:
                  train_sample_count, metadata, probes=None, console=True,
                  run_name=None, resume=False, reserved=False, status=None, diagnostics=None):
         config.validate()
+        if resume and not config.checkpoints.enabled:
+            raise ValueError("Resume requires checkpoints enabled")
         if train_sample_count <= 0:
             raise ValueError("train_sample_count must be positive")
         if jax.process_count() != 1:
@@ -80,6 +82,8 @@ class ExperimentRunner:
             stored_config.setdefault("diagnostics", json.loads(json.dumps(asdict(DiagnosticConfig()))))
             stored_config["method"].setdefault("policy_mode", "continuous")
             stored_config["method"].setdefault("alternating_first", "sgd")
+            # Runs created before the opt-out switch always saved checkpoints.
+            stored_config["checkpoints"].setdefault("enabled", True)
             if stored_config != json.loads(json.dumps(config.as_dict())):
                 self.recorder.close()
                 raise ValueError("Resume configuration differs from the original run")
@@ -171,7 +175,9 @@ class ExperimentRunner:
                 timing("probe", time.perf_counter() - before)
 
         def save(slots):
-            if not slots:
+            # Return before cursor flush, source snapshot and device serialization.
+            # Disabling checkpoints must not change training or probe recording.
+            if not c.checkpoints.enabled or not slots:
                 return
             before = time.perf_counter()
             cursors = recorder.cursors()
@@ -281,8 +287,8 @@ class ExperimentRunner:
                 pending.append((step, metrics, eta, samples_seen, elapsed()))
                 eval_due = self.eval_schedule.due(step, samples_seen)
                 epoch_end = samples_seen // self.sample_count > before_samples // self.sample_count
-                save_slots = list(milestones.get(step, []))
-                if step % c.checkpoints.latest_every_steps == 0 or (c.checkpoints.at_epoch_end and epoch_end) or step == c.training.total_steps:
+                save_slots = list(milestones.get(step, [])) if c.checkpoints.enabled else []
+                if c.checkpoints.enabled and (step % c.checkpoints.latest_every_steps == 0 or (c.checkpoints.at_epoch_end and epoch_end) or step == c.training.total_steps):
                     save_slots.append("latest")
                 node_due = c.probes.enabled and step in nodes
                 log_due = self.log_schedule.would_trigger(step, samples_seen)
