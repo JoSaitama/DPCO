@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 import tomllib
 
+from src.probes.mechanism_config import MechanismConfig
+
 
 METHODS = ("sgd", "sage", "sage_loo", "dtv", "dtv_loo", "random_flip", "sage_policy")
 REFERENCES = ("loss", "error")
@@ -134,6 +136,7 @@ class RunConfig:
     execution: ExecutionConfig = ExecutionConfig()
     seed: int = 42
     global_batch_size: int = 256
+    mechanism: MechanismConfig = MechanismConfig()
 
     def validate(self) -> None:
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or not 0 <= self.seed < 2**32:
@@ -231,6 +234,7 @@ class RunConfig:
         if self.probes.enabled and self.method.name != "sage":
             raise ValueError("Common-reference theorem probes currently require full sage")
         d = self.diagnostics
+        self.mechanism.validate(self.training, self.method)
         for flag in (d.enabled, d.update_check, d.paired_loss, d.transfer):
             if not isinstance(flag, bool):
                 raise ValueError("Diagnostic switches must be booleans")
@@ -272,6 +276,7 @@ def load_config(path: str | Path) -> RunConfig:
         checkpoints=CheckpointConfig(**raw.pop("checkpoints", {})),
         probes=ProbeConfig(**raw.pop("probes", {})),
         diagnostics=DiagnosticConfig(**raw.pop("diagnostics", {})),
+        mechanism=MechanismConfig(**raw.pop("mechanism", {})),
         execution=ExecutionConfig(**raw.pop("execution", {})),
         **raw,
     )

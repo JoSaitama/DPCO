@@ -23,6 +23,7 @@ from src.training.launch import (absolute_path, add_overrides, diagnostic_cli_ar
 from src.training.results import ResultsPaths, make_run_name
 from src.training.runtime import configure_worker0
 from src.training.status import RunStatus
+from src.probes.mechanism_config import overrides as mechanism_overrides, cli_args as mechanism_cli_args
 
 
 def plan_job(args, path, config, method):
@@ -50,6 +51,7 @@ def plan_job(args, path, config, method):
     if args.checkpoints is not None:
         command.append("--checkpoints" if args.checkpoints else "--no-checkpoints")
     command.extend(diagnostic_cli_args(args))
+    command.extend(mechanism_cli_args(args))
     if args.resume:
         command.extend(["--resume", "--resume-slot", args.resume_slot])
     return paths, command
@@ -136,7 +138,7 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
                 min_learning_rate=args.min_learning_rate, checkpoint_every_steps=args.checkpoint_every_steps,
                 checkpoints=args.checkpoints,
                 eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
-                **diagnostic_overrides(args))
+                **diagnostic_overrides(args), **mechanism_overrides(args))
             jobs.append((config, method))
     if args.resume and not jobs[0][0].checkpoints.enabled:
         parser.error("Resume requires checkpoints enabled; --no-checkpoints runs cannot be resumed")
@@ -163,6 +165,9 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             "evaluation_mode": config.evaluation.mode,
             "evaluation_interval": config.evaluation.interval,
             "diagnostics": config.as_dict()["diagnostics"],
+            "mechanism": config.as_dict()["mechanism"],
+            "active_mechanism_steps": ([t for t in range(config.training.total_steps) if config.mechanism.due(t)]
+                                       if config.mechanism.enabled else []),
             "active_diagnostic_state_steps": [t for t in config.diagnostics.steps
                 if config.diagnostics.enabled and t < config.training.total_steps]} for config, paths, command in previews]
         print(json.dumps(plans[0] if len(plans) == 1 else plans, indent=2))

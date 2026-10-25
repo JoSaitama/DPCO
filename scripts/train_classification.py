@@ -15,6 +15,7 @@ from src.training.launch import absolute_path, add_overrides, diagnostic_overrid
 from src.training.runtime import configure_worker0, require_local_tpu
 from src.training.results import ResultsPaths
 from src.training.status import RunStatus
+from src.probes.mechanism_config import overrides as mechanism_overrides
 
 
 def run(args, config, devices, *, status):
@@ -66,6 +67,7 @@ def run(args, config, devices, *, status):
         trainer = LocalMeshTrainer(train_task, method, updater, mesh)
         source = ImageBatchSource(images, batch_size, image_size, config.seed)
         diagnostics = None
+        mechanism = None
         if config.diagnostics.enabled:
             from dataclasses import replace
             from src.data.diagnostic_batches import training_audit_batches
@@ -78,6 +80,28 @@ def run(args, config, devices, *, status):
                         config.diagnostics.audit_batches, config.diagnostics.audit_seed))
             diagnostics = TrainingDiagnostics(train_task, method, config.diagnostics,
                 reference_name=config.reference.name, trajectory_method=config.method.name, audit_batches=audits)
+        if config.mechanism.enabled:
+            import hashlib
+            import importlib.metadata
+            import time
+            from dataclasses import replace
+            from src.data.diagnostic_batches import training_audit_batches
+            from src.probes.tpu_mechanisms import TPUMechanisms
+            mechanism_setup = time.perf_counter()
+            bank = ()
+            if config.mechanism.needs_bank:
+                bank = tuple(replace(item, batch=jax.device_put(item.batch, trainer.batch_sharding))
+                    for item in training_audit_batches(images, batch_size, image_size,
+                        config.mechanism.bank_batches, config.mechanism.bank_seed))
+            signature = hashlib.sha256((ROOT / "src/models/resnet.py").read_bytes()
+                + (ROOT / "src/tasks/classification.py").read_bytes()).hexdigest()
+            signature += f":{config.model.name}:{config.model.precision}:{config.data.num_classes}"
+            signature += f":jax={jax.__version__}:flax={importlib.metadata.version('flax')}:matmul={jax.config.jax_default_matmul_precision}"
+            mechanism = TPUMechanisms(train_task, method, config.mechanism,
+                reference_name=config.reference.name, trajectory_method=config.method.name,
+                bank_batches=bank, fixed_buffers=state.model_state, signature=signature,
+                compute_dtype=config.model.precision)
+            mechanism.setup_duration_s = time.perf_counter()-mechanism_setup
         batch_metrics = jax.jit(lambda p, b, s: task_metrics(eval_task.evaluate(p, b, s), include_top5=True),
             in_shardings=(replicated, trainer.batch_sharding, replicated), out_shardings=replicated)
         evaluation = EvaluationSpec(eval_task,
@@ -119,7 +143,8 @@ def run(args, config, devices, *, status):
             "theorem_scope": "reference identities and fixed-target diagnostics, not an automatic convergence-rate proof"}
         runner = ExperimentRunner(config, trainer, source, evaluation, base_dir=ROOT,
             train_sample_count=images.counts["train"], metadata=metadata, probes=probes,
-            run_name=args.run_name, resume=args.resume, reserved=args.reserved, status=status, diagnostics=diagnostics)
+            run_name=args.run_name, resume=args.resume, reserved=args.reserved, status=status,
+            diagnostics=diagnostics, mechanism=mechanism)
         runner.run(state, resume_slot=args.resume_slot)
     finally:
         images.close()
@@ -150,7 +175,7 @@ def main():
                             checkpoint_every_steps=args.checkpoint_every_steps,
                             checkpoints=args.checkpoints,
                             eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
-                            **diagnostic_overrides(args))
+                            **diagnostic_overrides(args), **mechanism_overrides(args))
     if args.resume and not config.checkpoints.enabled:
         parser.error("Resume requires checkpoints enabled; --no-checkpoints runs cannot be resumed")
     paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT).experiment(args.run_name)

@@ -1,0 +1,75 @@
+# Independent opt-in qualification preset; production preset namespace is unchanged.
+seed = 2
+global_batch_size = 256
+
+[data]
+name = "imagenet100"
+num_classes = 100
+image_size = 224
+class_manifest = "configs/manifests/imagenet100_classes.txt"
+mode = "clean"
+hf_repo_id = "ILSVRC/imagenet-1k"
+hf_revision = "49e2ee26f3810fb5a7536bbf732a7b07389a47b5"
+prepared_dir = "../data"
+
+[model]
+name = "resnet50"
+initialization = "random"
+precision = "float32"
+
+[method]
+name = "sgd"
+
+[reference]
+name = "loss"
+
+[training]
+learning_rate = 0.01
+total_steps = 12
+momentum = 0.0
+nesterov = false
+l2_coefficient = 0.0
+lr_schedule = "constant"
+
+[execution]
+visible_chips = "0,1,2,3"
+chips_per_process_bounds = "2,2,1"
+port = 8476
+startup_timeout_s = 180
+gradient_backend = "jvp"
+
+[results]
+root_dir = "results"
+
+[logging]
+mode = "steps"
+interval = 1
+csv_flush_steps = 50
+timing_window_steps = 50
+
+[evaluation]
+mode = "steps"
+interval = 12
+
+[checkpoints]
+enabled = false
+latest_every_steps = 100
+at_epoch_end = false
+
+[probes]
+enabled = false
+
+[mechanism]
+enabled = true
+update_check = true
+paired_loss = true
+bank_moments = true
+norm_matched = true
+steps = [0, 1, 5, 10]
+moment_steps = [0, 10]
+oracle_steps = [0]
+absolute_lrs = [0.0, 0.001, 0.005, 0.01, 0.02]
+lr_scales = [1.0, 0.5]
+windows = [[0, 12]]
+bank_batches = 2
+bank_seed = 42

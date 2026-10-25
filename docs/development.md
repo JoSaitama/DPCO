@@ -1,5 +1,40 @@
 # Development record
 
+## 2026-10-24: opt-in real TPU mechanism/LR diagnostics
+
+- Reused the real classification entry, LocalMeshTrainer, staged scalar AD/JVP,
+  training-audit sampler and private RunRecorder schemas. Added independent
+  mechanism_config, fixed_training_bank and tpu_mechanisms modules, an opt-in
+  shell wrapper and a separate qualification preset under configs/tpu/mechanisms/.
+- Original method/reference/trainer/updater/policy files are unchanged. Existing
+  presets, legacy CSV schemas, lifecycle TSV and default checkpoint payloads are
+  unchanged. Config/CLI forwarding and the runner gain only guarded observer
+  hooks, private streams and observer checkpoint state. Master switch defaults off.
+- Added same-state E/L T1 checks, separate absolute/relative LR grids, clearly
+  separated independent/actual pairs, read-only norm matching and selected exact
+  finite-bank-reference oracles. Masks remain frozen; zeros/empty references have
+  explicit flags/undefined ratios. Numeric reliability is not inferred from finite.
+- F_A freezes whole global training batches/augmentations/masks and initial input
+  buffers in TRAIN mode; candidate buffers are discarded. Model/source/precision/
+  dependency/input/buffer fingerprints identify the target and are checked on resume.
+  Uniform finite-bank moments do not claim a full-data expectation or population SE.
+- Continuous windows record actual displacement P/R, endpoints and exact prefix
+  counts. Snapshot/restore keeps the fixed-target prefix; validate it BEFORE CSV
+  rewind/future pruning. Sparse nodes cannot produce a complete-window claim.
+- Compiled stages synchronize sequentially; no dense Jacobian or B-backward sample
+  energy. Setup/compile/diagnostic/IO timing is separate from existing train timing.
+- All173 CPU/offline regression tests passed. Coverage includes private disabled
+  cursors, exact on/off trajectories and resume, scalar/dense oracles, two-device
+  global BN, actual/counterfactual labels, absolute LRs, frozen/empty/all-error masks,
+  zero LR/norms, unsupported BF16 qualification, fault flags, window gaps, scalar
+  candidate-loss reuse for overlapping LR labels, original/effective gain semantics and real
+  tiny-ResNet entry integration. Final targeted observer/checkpoint checks also pass.
+- Qualification3-job and short-grid9-job TPU commands passed DRY RUN only. No
+  TPU/remote job or real data download/preparation was performed; CPU checks do
+  not certify TPU numeric error, compilation, peak memory or speed. Complete flags,
+  costs, schema semantics and later execution commands: docs/tpu_mechanisms.md.
+- No automatic commit/push. No SAGE-win criterion or new runtime optimization rule.
+
 ## 2026-10-24: independent finite CPU theory/LR validation
 
 - Added run_sage_theory_suite.sh, scripts/validate_sage_theory.py and

@@ -12,7 +12,7 @@ import time
 import jax
 import numpy as np
 
-from src.config import DiagnosticConfig, TrainingConfig
+from src.config import DiagnosticConfig, TrainingConfig, MechanismConfig
 from src.methods.base import AlignmentMethod
 from src.training.checkpoints import CheckpointStore
 from src.training.randomness import training_key
@@ -25,7 +25,7 @@ from src.training.status import RunStatus
 class ExperimentRunner:
     def __init__(self, config, trainer, source, evaluation, *, base_dir,
                  train_sample_count, metadata, probes=None, console=True,
-                 run_name=None, resume=False, reserved=False, status=None, diagnostics=None):
+                 run_name=None, resume=False, reserved=False, status=None, diagnostics=None, mechanism=None):
         config.validate()
         if resume and not config.checkpoints.enabled:
             raise ValueError("Resume requires checkpoints enabled")
@@ -39,6 +39,8 @@ class ExperimentRunner:
             raise ValueError("Enabled probes require an explicit read-only probe adapter")
         if config.diagnostics.enabled and diagnostics is None:
             raise ValueError("Enabled real-update diagnostics require an explicit read-only adapter")
+        if config.mechanism.enabled and mechanism is None:
+            raise ValueError("Enabled mechanisms require an explicit read-only adapter")
         if resume and run_name is None:
             raise ValueError("Resume requires an explicit existing run name")
         if config.probes.enabled and not isinstance(trainer.method, AlignmentMethod):
@@ -49,6 +51,12 @@ class ExperimentRunner:
             self.trainer = trainer.with_method(replace(trainer.method, record_theory=record))
         self.evaluation, self.probes = evaluation, probes
         self.diagnostics = diagnostics if config.diagnostics.enabled else None
+        self.mechanism = mechanism if config.mechanism.enabled else None
+        schemas = None
+        if self.mechanism is not None:
+            from src.training.recording import SCHEMAS
+            from src.probes.tpu_mechanisms import SCHEMAS as MECHANISM_SCHEMAS
+            schemas = {**SCHEMAS, **MECHANISM_SCHEMAS}
         self.sample_count = train_sample_count
         self.paths = ResultsPaths.resolve(config.results.root_dir, base_dir=base_dir).experiment(run_name or make_run_name(config))
         if reserved and not resume:
@@ -70,9 +78,11 @@ class ExperimentRunner:
             "accuracy_unit": "fraction", "rng_convention": "seed/step/stream; source owns data RNG",
             "train_timestamp_convention": "host dispatch time; window throughput synchronizes device completion",
             **({"training_diagnostics": self.diagnostics.metadata()} if self.diagnostics is not None else {}),
-        }, console=console, resume=resume, status=status)
+            **({"tpu_mechanisms": self.mechanism.metadata()} if self.mechanism is not None else {}),
+        }, console=console, resume=resume, status=status, schemas=schemas)
         if resume:
-            stored_config = json.loads((self.paths.logs / "metadata.json").read_text())["config"]
+            stored_metadata = json.loads((self.paths.logs / "metadata.json").read_text())
+            stored_config = stored_metadata["config"]
             # Older checkpoints predate optional update controls and used the off path.
             # Compare its implicit default without rewriting original metadata.
             for key in ("l2_coefficient", "momentum", "nesterov", "lr_schedule", "min_learning_rate"):
@@ -80,6 +90,7 @@ class ExperimentRunner:
             # Legacy runs implicitly had diagnostics disabled. Do not enable an
             # observer during resume or reinterpret their existing CSV records.
             stored_config.setdefault("diagnostics", json.loads(json.dumps(asdict(DiagnosticConfig()))))
+            stored_config.setdefault("mechanism", json.loads(json.dumps(asdict(MechanismConfig()))))
             stored_config["method"].setdefault("policy_mode", "continuous")
             stored_config["method"].setdefault("alternating_first", "sgd")
             # Runs created before the opt-out switch always saved checkpoints.
@@ -87,6 +98,9 @@ class ExperimentRunner:
             if stored_config != json.loads(json.dumps(config.as_dict())):
                 self.recorder.close()
                 raise ValueError("Resume configuration differs from the original run")
+            if self.mechanism is not None and stored_metadata.get("tpu_mechanisms", {}).get("target") != self.mechanism.metadata()["target"]:
+                self.recorder.close()
+                raise ValueError("Resume fixed mechanism target differs from the original run")
         self.resume = resume
         self.log_schedule = EventSchedule(config.logging.mode, config.logging.interval,
             total_steps=config.training.total_steps, train_sample_count=train_sample_count)
@@ -106,6 +120,10 @@ class ExperimentRunner:
         best, best_step, last_eval = None, None, None
         if self.resume:
             saved = self.store.load(resume_slot)
+            if self.mechanism is not None:
+                # Validate observer prefixes before rewinding CSVs or pruning an
+                # abandoned future. A corrupt observer state must fail closed.
+                self.mechanism.restore(saved.get("mechanism_state"), step=int(saved["train_state"].step))
             state, samples_seen = saved["train_state"], saved["samples_seen"]
             if c.method.name == "sage_policy":
                 from src.methods.sage_policy import PolicyState
@@ -181,12 +199,15 @@ class ExperimentRunner:
                 return
             before = time.perf_counter()
             cursors = recorder.cursors()
-            size = self.store.save(int(state.step), {
+            payload = {
                 "train_state": state, "source_state": self.source.snapshot(),
                 "rng_seed": c.seed, "samples_seen": samples_seen, "cumulative": cumulative,
                 "best": best, "best_step": best_step, "last_eval": last_eval,
                 "elapsed_wall_s": elapsed(), "csv_cursors": cursors,
-            }, slots)
+            }
+            if self.mechanism is not None:
+                payload["mechanism_state"] = self.mechanism.snapshot()
+            size = self.store.save(int(state.step), payload, slots)
             timing("checkpoint", time.perf_counter() - before, checkpoint_bytes=size)
 
         compiled_step = self.trainer.compile_step()
@@ -268,8 +289,9 @@ class ExperimentRunner:
             while step < c.training.total_steps:
                 before_samples = samples_seen
                 diagnostic_due = self.diagnostics is not None and step in diagnostic_nodes
+                mechanism_due = self.mechanism is not None and c.mechanism.due(step)
                 batch = next(self.source)
-                if diagnostic_due:
+                if diagnostic_due or mechanism_due:
                     # Retain only selected states. The NORMAL compiled step below
                     # remains identical, with no extra gradient outputs or traces.
                     before_state = state
@@ -293,7 +315,7 @@ class ExperimentRunner:
                 node_due = c.probes.enabled and step in nodes
                 log_due = self.log_schedule.would_trigger(step, samples_seen)
                 boundary = (len(pending) >= c.logging.timing_window_steps or step % c.logging.csv_flush_steps == 0
-                            or log_due or eval_due or node_due or save_slots or diagnostic_due or step == c.training.total_steps)
+                            or log_due or eval_due or node_due or save_slots or diagnostic_due or mechanism_due or step == c.training.total_steps)
                 if boundary:
                     drain()
                     jax.block_until_ready(state)
@@ -311,7 +333,20 @@ class ExperimentRunner:
                         # Synchronizing/writing happens only at diagnostic nodes;
                         # release the frozen parameter tree immediately afterwards.
                         recorder.flush()
-                        del before_state, context, rows
+                        del rows
+                    if mechanism_due:
+                        rows = self.mechanism.run(before_state, state, batch, learning_rate=eta,
+                            rng_key=training_key(c.seed, before_state.step), context=context,
+                            cumulative_eta_before=cumulative["cumulative_eta"]-eta)
+                        io_start = time.perf_counter()
+                        for stream, row in rows:
+                            recorder.record(stream, **row)
+                        recorder.flush()
+                        recorder.record("mechanism_timing", step=int(before_state.step), event="recording_io",
+                            kernel="recorder", duration_s=time.perf_counter()-io_start)
+                        del rows
+                    if diagnostic_due or mechanism_due:
+                        del before_state, context
                     if eval_due or step == c.training.total_steps:
                         if evaluate():
                             save_slots.append("best")

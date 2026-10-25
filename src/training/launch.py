@@ -16,6 +16,8 @@ POLICY_METHODS = {f"sage_{reference}_{mode}": (signal, mode)
 
 def add_overrides(parser, *, multiple=False):
     """Use identical override names in the launcher and single-run child."""
+    from src.probes.mechanism_config import add_arguments
+    add_arguments(parser)
     if multiple:
         parser.add_argument("--seed", "--seeds", dest="seeds", nargs="+", type=int,
                             help="One or more seeds; omission honors the selected config")
@@ -96,7 +98,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
                    diagnostics=None, diagnostic_steps=None, diagnostic_update_check=None,
                    diagnostic_paired_loss=None, diagnostic_transfer=None, diagnostic_lr_scales=None,
-                   diagnostic_audit_batches=None, diagnostic_audit_seed=None):
+                   diagnostic_audit_batches=None, diagnostic_audit_seed=None, **mechanism_options):
     if eval_every_steps is not None and eval_every_epochs is not None:
         raise ValueError("eval_every_steps and eval_every_epochs are mutually exclusive")
     config = load_config(path)
@@ -180,6 +182,11 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         ("lr_scales", diagnostic_lr_scales), ("audit_batches", diagnostic_audit_batches),
         ("audit_seed", diagnostic_audit_seed)) if value is not None}
     config = replace(config, diagnostics=replace(config.diagnostics, **diagnostic_changes))
+    from src.probes.mechanism_config import changes, OPTIONS
+    unknown = set(mechanism_options) - set(OPTIONS)
+    if unknown:
+        raise TypeError(f"Unknown configuration overrides: {sorted(unknown)}")
+    config = replace(config, mechanism=replace(config.mechanism, **changes(mechanism_options)))
     config.validate()
     return config
 

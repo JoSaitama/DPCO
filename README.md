@@ -5,6 +5,12 @@ separation. Repository code, comments and documentation use English.
 
 ## Current stage
 
+[Opt-in TPU mechanism checks](docs/tpu_mechanisms.md) extend the real classification
+suite with both references, absolute LR candidates, a genuinely fixed train-mode
+bank, finite-bank moments and continuous-window accounting. They are off by
+default. `run_sage_mechanism_suite.sh` is the separate TPU wrapper; the existing
+synthetic theory suite remains CPU-only. Development tests do not certify TPU.
+
 An independent [CPU theory/LR validation suite](docs/theory_validation.md) tests
 the original SGD/SAGE-E/SAGE-L on smooth synthetic classification data, with
 analytic counterexamples, conditional moments and full-target cumulative bounds.
