@@ -52,8 +52,12 @@ def make_run_name(config, *, timestamp=None):
     if label in ("sage", "sage_loo", "dtv", "dtv_loo"):
         label = label.replace("_loo", "") + ("_e" if config.reference.name == "error" else "_l") + ("_loo" if label.endswith("_loo") else "")
     parts = (config.data.name, config.data.mode, config.model.name, label,
-             str(config.seed), format(config.training.learning_rate, ".12g"),
-             timestamp.strftime("%Y%m%d_%H%M%S"))
+             str(config.seed), format(config.training.learning_rate, ".12g"))
+    # Label newly created decaying-rate runs in logs/files/runs and lifecycle
+    # records. Constant names and explicit historical resume names stay unchanged.
+    if config.training.lr_schedule != "constant":
+        parts += (config.training.lr_schedule,)
+    parts += (timestamp.strftime("%Y%m%d_%H%M%S"),)
     name = "_".join(parts)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
         raise ValueError("Run-name fields must be safe directory components")

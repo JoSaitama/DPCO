@@ -298,6 +298,9 @@ budget dependence; it does not force the final rate to zero. Both the compiled
 update and host-side CSV/probe rate use the same schedule implementation. Constant
 remains the default. The bounded theory-motivated comparison and its limitations
 are documented in [TPU mechanisms](docs/tpu_mechanisms.md#predetermined-inverse-square-root-comparison-2026-10-25).
+New cosine/inverse_sqrt run directory names include the schedule immediately
+before the timestamp, across logs/files/runs and lifecycle records. Constant
+names retain their original format; resume continues to use the explicit saved name.
 
 Preview a configured suite without launching or downloading:
 

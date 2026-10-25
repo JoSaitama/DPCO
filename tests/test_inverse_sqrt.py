@@ -6,6 +6,7 @@ No production training child, data preparation or accelerator launch is needed.
 
 import csv
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 import math
 import os
@@ -23,6 +24,7 @@ from src.config import TrainingConfig, load_config
 from src.training.experiment import ExperimentRunner
 from src.training.launch import resolve_config
 from src.training.learning_rates import InverseSqrtLearningRate, learning_rate_for
+from src.training.results import make_run_name
 from src.training.updates import make_updater
 from tests.test_observation import ROOT, fixture_components, fixture_config
 
@@ -31,6 +33,18 @@ PRESET = ROOT / "configs/tpu/imagenet100_resnet50_sgd.toml"
 
 
 class InverseSqrtTests(unittest.TestCase):
+    def test_new_decay_run_names_include_schedule_without_changing_constant_names(self):
+        config = load_config(PRESET)
+        config = replace(config, seed=5, training=replace(config.training, learning_rate=.05))
+        timestamp = datetime(2026, 10, 25, 12, 30, 45, tzinfo=timezone.utc)
+        prefix = "imagenet100_clean_resnet50_sgd_5_0.05"
+        for schedule in ("constant", "cosine", "inverse_sqrt"):
+            with self.subTest(schedule=schedule):
+                selected = replace(config, training=replace(config.training, lr_schedule=schedule))
+                suffix = "" if schedule == "constant" else "_" + schedule
+                self.assertEqual(make_run_name(selected, timestamp=timestamp),
+                                 prefix + suffix + "_20261025_123045")
+
     def test_host_compiled_and_large_absolute_steps_match_formula(self):
         schedule = InverseSqrtLearningRate(.01)
         steps = np.array([0, 1, 3, 99, 4999, 1_000_000], dtype=np.int32)
@@ -117,6 +131,7 @@ class InverseSqrtTests(unittest.TestCase):
                 self.assertEqual(len(plans), 3)
                 for plan in plans:
                     self.assertEqual(plan["lr_schedule"], "inverse_sqrt")
+                    self.assertIn("_inverse_sqrt_", plan["stdout"])
                     command = plan["command"]
                     value = lambda flag: command[command.index(flag) + 1]
                     self.assertEqual(value("--lr-schedule"), "inverse_sqrt")

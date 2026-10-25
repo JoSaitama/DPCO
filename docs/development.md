@@ -1,5 +1,17 @@
 # Development record
 
+## 2026-10-25: identify decaying-rate runs in output directory names
+
+- User requested manual launch commands for cosine-to-zero and inverse_sqrt,
+  initial LR .05, seed5, T5000, original SGD/SAGE-E/SAGE-L. These two schedules
+  are an explicit bounded comparison, not an automatically expanded LR grid.
+- New nonconstant run names append cosine or inverse_sqrt before the timestamp,
+  using the shared path builder for logs/files/runs and lifecycle TSV identities.
+  Constant naming and explicit historical resume names remain unchanged. No
+  optimizer arithmetic, recording schema or output-root changes are introduced.
+- Local unit checks and configuration dry runs only; no SSH, server launch,
+  production training child, commit or push. Commands are user-run only.
+
 ## 2026-10-25: minimal predetermined inverse-square-root schedule
 
 - Added only InverseSqrtLearningRate: eta_t=eta0/sqrt(t+1), indexed by absolute
