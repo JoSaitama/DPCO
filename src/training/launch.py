@@ -39,8 +39,8 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--nesterov", action=argparse.BooleanOptionalAction, default=None,
                         help="Use Nesterov momentum; requires --momentum > 0")
     parser.add_argument("--lr", "--learning-rate", dest="learning_rate", type=float,
-                        help="Constant learning rate or cosine peak; not automatically scaled by batch size")
-    parser.add_argument("--lr-schedule", choices=("constant", "cosine"))
+                        help="Constant rate, cosine peak or inverse-square-root initial rate; no automatic batch-size scaling")
+    parser.add_argument("--lr-schedule", choices=("constant", "cosine", "inverse_sqrt"))
     parser.add_argument("--min-lr", dest="min_learning_rate", type=float,
                         help="Cosine floor, including zero; default 0")
     parser.add_argument("--checkpoint-every-steps", type=int,

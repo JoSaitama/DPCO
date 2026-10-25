@@ -205,13 +205,13 @@ class RunConfig:
             raise ValueError("nesterov requires nonzero momentum")
         if self.probes.enabled and self.training.momentum != 0:
             raise ValueError("Current theorem probes require momentum=0; their updates exclude momentum")
-        if self.training.lr_schedule not in ("constant", "cosine"):
-            raise ValueError("lr_schedule must be constant or cosine")
+        if self.training.lr_schedule not in ("constant", "cosine", "inverse_sqrt"):
+            raise ValueError("lr_schedule must be constant, cosine or inverse_sqrt")
         if (isinstance(self.training.min_learning_rate, bool)
                 or not math.isfinite(self.training.min_learning_rate)
                 or not 0 <= self.training.min_learning_rate <= self.training.learning_rate):
             raise ValueError("min_learning_rate must be finite and in [0, learning_rate]")
-        if self.training.lr_schedule == "constant" and self.training.min_learning_rate != 0:
+        if self.training.lr_schedule != "cosine" and self.training.min_learning_rate != 0:
             raise ValueError("min_learning_rate requires lr_schedule=cosine")
         if not isinstance(self.results.root_dir, str) or not self.results.root_dir.strip():
             raise ValueError("results.root_dir must be a nonempty path")

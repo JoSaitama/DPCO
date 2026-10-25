@@ -350,8 +350,8 @@ class ExperimentSpec:
 
 def run_experiment(system, spec, recorder):
     """All real transitions are Trainer.step; observer computations are read-only."""
-    if spec.method not in system.methods or spec.schedule not in ("constant", "cosine"):
-        raise ValueError("Only original SGD/SAGE-E/L and constant/cosine are supported")
+    if spec.method not in system.methods or spec.schedule not in ("constant", "cosine", "inverse_sqrt"):
+        raise ValueError("Only original SGD/SAGE-E/L and constant/cosine/inverse_sqrt are supported")
     if spec.steps < 1 or spec.batch_size < 1 or spec.probes < 0:
         raise ValueError("Positive training budget/batch size and nonnegative probes required")
     training = TrainingConfig(total_steps=spec.steps, learning_rate=spec.lr,

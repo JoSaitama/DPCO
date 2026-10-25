@@ -1,5 +1,35 @@
 # Development record
 
+## 2026-10-25: minimal predetermined inverse-square-root schedule
+
+- Added only InverseSqrtLearningRate: eta_t=eta0/sqrt(t+1), indexed by absolute
+  completed updates, independent of total budget. No warmup, floor, exponent
+  search, switch point or batch-adaptive LR. Constant remains the default;
+  constant/cosine arithmetic and the original method/reference/BN/update rules
+  are unchanged. Nonzero min_learning_rate is accepted only for cosine.
+- Exposed inverse_sqrt through TOML, shared parent/child CLI and every existing
+  shell suite, plus the separate CPU theory CLI. Existing forwarding/metadata/
+  resume paths already preserve the schedule; no new checkpoint fields are needed.
+- Sixteen targeted CPU unit tests passed: analytic host/JIT rates at step0 and
+  large steps, compiled parameter increments, all three original methods' tiny
+  fixture resume/recording consistency, changed-schedule rejection, legacy
+  metadata compatibility, default constant graph and cosine regression, and
+  configuration-only suite/child forwarding. No CPU training grid was run.
+- Replaced the future sweep proposal with one documented three-method user-run
+  inverse_sqrt comparison, eta0=.01/seed2/B256/T5000, sparse existing observers,
+  no continuous windows or oracle, and no legacy sample-energy probes. Common
+  absolute probe LRs remain separate from the decaying executed LR.
+- Read the canonical 2026-10-25 theory revision and historical constant exports.
+  Exported seed2 .01 train CSVs exist, but their run folders lack metadata and
+  new mechanism streams; strict input/target equivalence is not established.
+  No new TPU mechanism output was found in those exported results. User-reported
+  initial remote tests are not reclassified as locally inspected TPU evidence.
+- Conditional stationarity motivation is not a certified ResNet LR threshold,
+  a claim of almost-sure convergence, or evidence that SAGE must beat SGD. No
+  additional T2-bound certification CLI is introduced by this scheduler patch.
+- No SSH, server operations, dataset download, production child, training grid,
+  TPU launch, Git commit or push. Commands are for the user to execute manually.
+
 ## 2026-10-24: opt-in real TPU mechanism/LR diagnostics
 
 - Reused the real classification entry, LocalMeshTrainer, staged scalar AD/JVP,

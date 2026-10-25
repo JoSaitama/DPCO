@@ -31,10 +31,29 @@ class CosineLearningRate:
         return self.minimum + .5 * (self.peak - self.minimum) * (1. + jnp.cos(jnp.pi * progress))
 
 
+@dataclass(frozen=True)
+class InverseSqrtLearningRate:
+    initial: float
+
+    def __post_init__(self):
+        if not math.isfinite(self.initial) or self.initial <= 0:
+            raise ValueError("initial learning rate must be positive and finite")
+
+    def __call__(self, step):
+        # step counts completed updates, including a restored checkpoint prefix.
+        # This predetermined schedule has no warmup, floor or budget dependence.
+        if isinstance(step, Real):
+            return self.initial / math.sqrt(step + 1.)
+        import jax.numpy as jnp
+        return self.initial / jnp.sqrt(step + 1.)
+
+
 def learning_rate_for(training):
     """Constant mode retains a scalar and the original compiled update path."""
     if training.lr_schedule == "constant":
         return training.learning_rate
     if training.lr_schedule == "cosine":
         return CosineLearningRate(training.learning_rate, training.min_learning_rate, training.total_steps)
-    raise ValueError("lr_schedule must be constant or cosine")
+    if training.lr_schedule == "inverse_sqrt":
+        return InverseSqrtLearningRate(training.learning_rate)
+    raise ValueError("lr_schedule must be constant, cosine or inverse_sqrt")

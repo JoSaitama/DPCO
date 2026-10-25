@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--methods", nargs="+", choices=("sgd", "sage_e", "sage_l"),
                         default=["sgd", "sage_e", "sage_l"])
     parser.add_argument("--lrs", nargs="+", type=float, default=[.01, .1])
-    parser.add_argument("--schedules", nargs="+", choices=("constant", "cosine"), default=["constant"])
+    parser.add_argument("--schedules", nargs="+", choices=("constant", "cosine", "inverse_sqrt"), default=["constant"])
     parser.add_argument("--min-lr", type=float, default=0.)
     parser.add_argument("--steps", type=int, default=80)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -50,7 +50,7 @@ def main():
         parser.error("Probe LRs must be nonnegative and finite")
     if not math.isfinite(args.min_lr) or not 0 <= args.min_lr <= min(args.lrs):
         parser.error("min-lr must be between zero and every peak LR")
-    if args.min_lr and "constant" in args.schedules:
+    if args.min_lr and any(schedule != "cosine" for schedule in args.schedules):
         parser.error("A nonzero min-lr requires a cosine-only grid")
     for values in (args.seeds, args.methods, args.lrs, args.schedules, args.probe_steps, args.probe_lrs):
         if len(set(values)) != len(values):

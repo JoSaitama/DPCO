@@ -134,7 +134,7 @@ def run(args, config, devices, *, status):
             "normalization": "ImageNet mean/std; train random resized crop and horizontal flip; eval resize/center crop",
             "train_tail": "drop_last_to_exclude_padding_from_training_batchnorm",
             "evaluation_tail": "padded_with_valid_count_weighting",
-            "optimizer": "SGD update with configured optional momentum/Nesterov, coupled L2 and constant/cosine LR; no decoupled weight decay, clipping or norm matching",
+            "optimizer": "SGD update with configured optional momentum/Nesterov, coupled L2 and constant/cosine/inverse_sqrt LR; no decoupled weight decay, clipping or norm matching",
             "model": config.model.name, "model_initialization": "random",
             "model_source_revision": "81b168d62f151feca9e8e7abc591df80168395b4",
             "parameter_count": sum(leaf.size for leaf in jax.tree_util.tree_leaves(params)),

@@ -185,7 +185,103 @@ contains real training windows/compile warmup; mechanism_timing adds observer
 costs. Setup includes fixed-bank construction and fingerprinting before the loop.
 Diagnostic-enabled elapsed time is not optimizer-only throughput.
 
-## Prepared-data TPU qualification and short-grid commands
+## Predetermined inverse-square-root comparison (2026-10-25)
+
+The previous proposed long constant/cosine sweep and nine-run early LR grid are
+superseded for future work. Historical outputs remain evidence, not new jobs.
+This scheduler-only change executes no SSH, production subprocess, data download,
+CPU training grid or TPU training. Configuration dry runs do not initialize JAX.
+
+`--lr-schedule inverse_sqrt` means eta_t=eta0/sqrt(t+1), where t is the absolute
+completed-update count. The shared updater and host recorder use the same callable;
+checkpoint recovery does not restart the clock. No exponent/floor/warmup/switch
+parameter is added. A nonzero --min-lr is rejected. Constant/cosine defaults and
+the method, reference, strict-negative flip, BN, dtype and valid-B mean are unchanged.
+
+Under the CONDITIONAL fixed-target assumptions h^T E_t Gs >= a||h||^2,
+E_t||Gs||^2 <= M||h||^2+sigma_s^2 and eta0 <= a/(LM), this predetermined schedule
+gives the weighted expected stationarity bound O(log(T)/sqrt(T)). Its squared
+rates are not summable; it is not an almost-sure convergence claim. No uniform
+a, M or valid path L is certified for this ResNet. Eta0=.01 is a historical
+comparison scale, not a proven admissible threshold or a promised SAGE advantage.
+
+The separate T2 sufficient condition uses C=Gs-Gd and
+eta < 2*Delta/[L*(2||Gd||||C||+||C||^2)] for the matching source objective.
+For a fixed F_A, replace Delta by Lambda=grad(F_A)^T C. It needs a genuine L bound
+covering the candidate paths. This minimal scheduler patch does not add a new
+eta_T2-multiple CLI or certify ResNet smoothness from Hessian/secant/loss data.
+Existing small logistic/quadratic evidence can be reused, but is not automatically
+a test of that precise threshold at the requested multiples.
+
+User-run command ONLY, after checking the existing full ImageNet100 cache and
+available worker0. It schedules exactly three original methods, not an LR grid:
+
+```bash
+cd ~/Project_SAGE/SAGE
+source ../.venv/bin/activate
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+suite_dir="results/logs/inverse_sqrt_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$suite_dir"
+nohup bash ./run_sage_mechanism_suite.sh \
+  --mode train --dataset imagenet100 --model resnet50 --data-mode clean \
+  --methods sgd sage_e sage_l --seeds 2 --steps 5000 --batch-size 256 \
+  --lr 0.01 --lr-schedule inverse_sqrt --min-lr 0 \
+  --momentum 0 --no-nesterov --l2-coefficient 0 \
+  --no-checkpoints --eval-every-steps 1000 \
+  --no-theorem-probes --no-diagnostics \
+  --mechanism-update-check --mechanism-paired-loss \
+  --mechanism-bank-moments --mechanism-norm-matched \
+  --mechanism-bank-batches 2 --mechanism-bank-seed 42 \
+  --mechanism-steps 0 10 25 100 1000 2500 4999 \
+  --mechanism-moment-steps 0 2500 4999 \
+  --mechanism-oracle-steps \
+  --mechanism-absolute-lrs 0 0.0001 0.001 0.01 0.02 \
+  --mechanism-lr-scales 1 \
+  --mechanism-windows \
+  >"$suite_dir/suite.log" 2>&1 < /dev/null &
+```
+
+Purpose: test what the same predetermined decay changes for SGD/E/L, while frozen
+states retain a COMMON absolute hypothetical LR set. Relative scale1 separately
+retains the executed rate for actual/independent comparisons. This is not an
+adaptive batch-dependent LR or a search for the best rate. Norm matching remains
+read-only at the seven selected source nodes. Windows/oracle are explicitly empty,
+overriding the qualification preset; the high-cost legacy sample-energy probes
+are off. K2 moments run at three nodes. Existing initial/final and every1000-step
+full validation remain, but held-out scores do not certify the training theory.
+Compilation/diagnostic costs are recorded, not predicted from CPU timing.
+No-checkpoints means this command cannot recover an interrupted run.
+
+For local CONFIGURATION inspection only, use the same flags with --dry-run and
+without the nohup/redirection/background wrapper. There must be three plans,
+each with inverse_sqrt, B256, T5000 and momentum/Nesterov/L2 off. Each actual run
+gets a distinct timestamped run name. Metadata identifies the config, code,
+prepared data and fixed bank; mechanism_context retains source indices and the
+stateless augmentation RNG protocol. Compare these identities across runs; seed
+equality alone is not an input/bank equivalence check, nor is the protocol string
+an independently measured image-array hash.
+
+Read results/logs/<run>/metadata.json and stdout.log; results/files/<run>/
+train_steps.csv for applied LR/train CE/top1; mechanism_update for numerical
+reliability; mechanism_t1 for source Delta/residual; mechanism_pairs for source
+and fixed-bank H, actual/independent and original/norm-matched labels;
+mechanism_transfer for Lambda; mechanism_moments for full h_A-dot-direction
+versus correction projections and finite-bank energies; mechanism_timing for cost.
+F_A is a fixed training proxy, not full ImageNet. Small unresolved differences,
+negative Lambda, ascent directions and unfavorable SAGE results must all remain.
+
+Historical seed2 constant .01 exported training CSVs can be reused as descriptive
+curves. They lack metadata/input fingerprints and the new mechanism target ID;
+strict matching to the new runs has not been established. A matched constant
+control is OPTIONAL: run exactly the same three-method command with only
+--lr-schedule constant changed and a distinct suite directory. Do not rerun a
+constant LR grid, silently merge targets or call a P/R identity a convergence proof.
+
+## Archived prepared-data qualification and short-grid commands
+
+The following 2026-10-24 examples are retained as development history, not the
+current recommended experiment plan. In particular, the old continuous window
+and nine-run grid are not scheduled by the new inverse-square-root command.
 
 The following are deliverable commands for a LATER authorized run. They were
 only dry-run inspected during this development task. Use the existing worker0

@@ -270,7 +270,7 @@ Optimizer and schedule options are shared by every method in a shell suite:
 | `--lr` / `--learning-rate` | `learning_rate` | 0.01 (untuned pilot) |
 | `--momentum` | `momentum` | 0 (off) |
 | `--nesterov` / `--no-nesterov` | `nesterov` | false |
-| `--lr-schedule constant\|cosine` | `lr_schedule` | constant |
+| `--lr-schedule constant\|cosine\|inverse_sqrt` | `lr_schedule` | constant |
 | `--min-lr` | `min_learning_rate` | 0 |
 | `--l2-coefficient` | `l2_coefficient` | 0 (off) |
 
@@ -281,7 +281,7 @@ Only a nonzero momentum allocates its velocity tree. Checkpoints preserve that
 tree from the initial snapshot onward; warmup does not consume momentum history.
 Nesterov requires nonzero momentum and is never implicitly enabled by momentum.
 
-`--lr` is the actual constant rate or cosine peak, with no automatic batch-size
+`--lr` is the actual constant rate, cosine peak or inverse-square-root initial rate, with no automatic batch-size
 scaling. Cosine has no implicit warmup. For T>=2 updates indexed 0..T-1, it uses
 `min_lr + (peak_lr-min_lr)*(1+cos(pi*step/(T-1)))/2`. Thus the first update uses the
 peak and the last uses the floor, including zero. A one-update run uses the peak;
@@ -289,7 +289,15 @@ queries after the budget return the floor. A zero-rate final update leaves finit
 parameters unchanged but still processes the batch and commits model/optimizer
 state. At zero-rate probe nodes, T2 division-by-rate fields are blank and strict
 gain eligibility is false; zero is never used as a denominator. A nonzero minimum
-in constant mode is rejected rather than silently ignored.
+in constant or inverse_sqrt mode is rejected rather than silently ignored.
+
+`inverse_sqrt` uses `learning_rate / sqrt(step + 1)`, where `step` is the absolute
+number of completed updates BEFORE the next update, including checkpoint recovery.
+The exponent is fixed at one half. It has no warmup, floor, switch point or total
+budget dependence; it does not force the final rate to zero. Both the compiled
+update and host-side CSV/probe rate use the same schedule implementation. Constant
+remains the default. The bounded theory-motivated comparison and its limitations
+are documented in [TPU mechanisms](docs/tpu_mechanisms.md#predetermined-inverse-square-root-comparison-2026-10-25).
 
 Preview a configured suite without launching or downloading:
 

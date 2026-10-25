@@ -59,23 +59,19 @@ or file writes; `--analytic-only` runs cases A/B/C. `--no-probes` or `--probe-co
 disables paired/moment sampling; cheap full-data observation and cases still run.
 No model checkpoint is saved.
 
-Full multi-seed/LR replication command, for the user to run (not automatically run):
-
-```bash
-./run_sage_theory_suite.sh \
-  --seeds 2 5 7 --methods sgd sage_e sage_l \
-  --lrs 0.001 0.005 0.01 0.05 0.1 --schedules constant cosine \
-  --steps 300 --batch-size 8 --samples 32 --dimensions 3 \
-  --data-seed 42 --probe-seed 42 \
-  --probe-steps 0 5 20 50 100 200 299 --probe-count 256 \
-  --probe-lrs 0 0.0001 0.001 0.005 0.01 0.05 0.1 \
-  --output results/theory_validation
-```
+The former proposed multi-seed constant/cosine replication grid is superseded
+by the 2026-10-25 theory-driven plan. The finite run above is historical evidence,
+not an instruction to repeat a training grid. The minimal scheduler extension also
+accepts `--schedules inverse_sqrt` through this CPU interface, but no CPU training
+grid is authorized or executed in the scheduler-only task. Real TPU commands use
+run_sage_mechanism_suite.sh; see docs/tpu_mechanisms.md.
 
 Every method gets the same grid/budget. `best_in_finite_grid.json` selects lowest
 final unsigned full-training CE per method/seed/schedule, allowing different best
 LRs. This is a finite training-objective grid, not an exact optimum or held-out
-estimate. Constant/cosine reuse existing schedules. A nonzero `--min-lr` requires
+estimate. Constant/cosine retain their existing behavior; inverse_sqrt is
+`eta0/sqrt(completed_updates+1)` with a fixed exponent and no floor/warmup.
+A nonzero `--min-lr` requires
 a cosine-only grid; its final update uses the floor, possibly0. Finite-budget
 cosine does not establish infinite-horizon convergence conditions.
 
