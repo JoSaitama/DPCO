@@ -36,6 +36,7 @@ def run(args, config, devices, *, status):
     from src.training.local_mesh import LocalMeshTrainer, local_mesh
     from src.training.metrics import task_metrics
     from src.training.updates import make_updater
+    from src.training.schedules import sage_warmup_steps
 
     batch_size, image_size = config.global_batch_size, config.data.image_size
     if batch_size % len(devices):
@@ -61,8 +62,9 @@ def run(args, config, devices, *, status):
         eval_task = ClassificationTask(model_adapter(model, train=False), config.data.num_classes)
         method = create_method(config.method.name, reference_name=config.reference.name,
             flip_probability=config.method.flip_probability, gradient_backend="jvp",
-            policy_mode=config.method.policy_mode, alternating_first=config.method.alternating_first)
-        if config.method.name == "sage_policy":
+            policy_mode=config.method.policy_mode, alternating_first=config.method.alternating_first,
+            warmup_steps=sage_warmup_steps(config))
+        if config.method.name == "sage_policy" or sage_warmup_steps(config):
             state = state._replace(method_state=jax.device_put(method.initial_state(), replicated))
         trainer = LocalMeshTrainer(train_task, method, updater, mesh)
         source = ImageBatchSource(images, batch_size, image_size, config.seed)
@@ -167,6 +169,7 @@ def main():
                             steps=args.steps, batch_size=args.batch_size, seed=args.seed,
                             method=args.method, dataset=args.dataset, model=args.model,
                             alternating_first=args.alternating_first,
+                            sage_warmup_percent=args.sage_warmup_percent,
                             data_mode=args.data_mode, data_dir=args.data_dir,
                             l2_coefficient=args.l2_coefficient,
                             momentum=args.momentum, nesterov=args.nesterov,

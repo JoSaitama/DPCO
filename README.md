@@ -98,6 +98,47 @@ counterfactuals remain in diagnostic_paired/transfer; diagnostic_policy records
 the active policy versus SGD, with alpha-scaled objective gain and the real policy
 endpoint at scale 1. See [diagnostic semantics](docs/training_diagnostics.md).
 
+## Optional SGD prefix before SAGE
+
+`--sage-warmup-percent P` runs the first `ceil(total_steps * P / 100)`
+updates with SGD, then switches to the original full SAGE-E/L rule. Default
+`P=0` preserves the original method and compiled training path. `P=100` runs
+SGD for the entire budget. This is a method warmup, not a learning-rate warmup:
+the configured LR schedule continues on absolute completed updates throughout.
+For example, `--steps 5000 --sage-warmup-percent 10` uses SGD on updates 1–500
+and SAGE from update 501. The SGD prefix is part of the total training budget.
+
+```bash
+./run_sage_suite.sh --dry-run --methods sage_e sage_l sgd --seed 5 \
+  --steps 5000 --batch-size 256 --lr 0.01 --sage-warmup-percent 10 \
+  --no-theorem-probes
+```
+
+The shared option applies to `sage_e`, `sage_l` and their `_continuous` aliases.
+SGD, half and alternating suite jobs keep their original behavior. In TOML set
+`method.sage_warmup_percent = 10.0`; nonzero values on unsupported methods are
+rejected. Percentages must be finite and between 0 and 100, including endpoints.
+
+Warmup runs include `_warmup10pct` (or the chosen percentage) in their run names
+and lifecycle method label. `policy_steps.csv` records `policy_mode=warmup`,
+`policy_alpha=0/1` and `executed_method=sgd/sage` for each completed update;
+printed train JSON includes the same fields. The config in `metadata.json`
+preserves the percentage, and suite dry-run reports the resolved update count.
+Checkpoint recovery preserves the absolute phase; changing the percentage or
+training budget on resume is rejected. Momentum, if enabled, is carried through
+the switch without resetting; other update controls and batch averaging are
+unchanged. Compilation warmup discards its candidate and consumes no prefix step.
+
+Legacy `--theorem-probes` is incompatible with this phased method; use
+`--no-theorem-probes`. Optional `--diagnostics` handles both phases and records
+the active direction separately from full-SAGE counterfactuals. Extended
+`--mechanisms` supports the original `sage_e/l` warmup runs: `actual_endpoint`
+is `sgd` during the prefix and `sage` afterwards, while source T1/pairs and
+conditional moments still describe hypothetical full-SAGE directions. The
+extended observer retains its existing restriction on `_continuous` aliases.
+This option enables a controlled experiment; it does not guarantee stability
+or an advantage over SGD.
+
 ## Start on worker0
 
 Use a separate Python 3.11+ environment. Do not reuse another project's dependencies:

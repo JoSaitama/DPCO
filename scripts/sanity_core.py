@@ -28,6 +28,7 @@ def run_sanity(config, steps):
     from src.training import TrainState, Trainer
     from src.training.results import ResultsPaths
     from src.training.updates import make_updater
+    from src.training.schedules import sage_warmup_steps
 
     def model_fn(params, images, state):
         return images @ params["w"] + params["b"], state
@@ -124,16 +125,19 @@ def run_sanity(config, steps):
     print("PASS: empty-error SGD fallback, all-error E/L equivalence, and zero-score retention")
 
     method = create_method(config.method.name, reference_name=config.reference.name,
-                           policy_mode=config.method.policy_mode, alternating_first=config.method.alternating_first)
+                           policy_mode=config.method.policy_mode, alternating_first=config.method.alternating_first,
+                           warmup_steps=sage_warmup_steps(config))
     updater = make_updater(config.training)
     trainer = Trainer(task, method, updater)
     compiled_step = jax.jit(trainer.step)
     state = TrainState(params, optimizer_state=updater.init(params))
-    if config.method.name == "sage_policy":
+    if config.method.name == "sage_policy" or config.method.sage_warmup_percent:
         state = state._replace(method_state=method.initial_state())
     velocity = {name: np.zeros_like(value) for name, value in params.items()}
     for step in range(steps):
         effective = config.method.name
+        if config.method.sage_warmup_percent:
+            effective = "sgd" if step < method.warmup_steps else "sage"
         if effective == "sage_policy":
             effective = {"continuous": "sage", "half": "dtv",
                          "alternating": "sage" if (step + int(config.method.alternating_first == "sage")) % 2

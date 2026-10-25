@@ -21,6 +21,7 @@ from src.config import load_config
 from src.training.launch import (absolute_path, add_overrides, diagnostic_cli_args,
                                  diagnostic_overrides, resolve_config)
 from src.training.results import ResultsPaths, make_run_name
+from src.training.schedules import sage_warmup_steps
 from src.training.runtime import configure_worker0
 from src.training.status import RunStatus
 from src.probes.mechanism_config import overrides as mechanism_overrides, cli_args as mechanism_cli_args
@@ -36,6 +37,7 @@ def plan_job(args, path, config, method):
     for flag, value in (("--steps", args.steps), ("--batch-size", args.batch_size),
                         ("--method", method), ("--dataset", args.dataset),
                         ("--alternating-first", args.alternating_first),
+                        ("--sage-warmup-percent", args.sage_warmup_percent),
                         ("--model", args.model), ("--data-mode", args.data_mode),
                         ("--data-dir", args.data_dir),
                         ("--l2-coefficient", args.l2_coefficient), ("--momentum", args.momentum),
@@ -132,6 +134,7 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             config = resolve_config(path, mode=args.mode, steps=args.steps, batch_size=args.batch_size,
                 seed=seed, method=method, dataset=args.dataset, model=args.model, data_mode=args.data_mode,
                 alternating_first=args.alternating_first,
+                sage_warmup_percent=args.sage_warmup_percent,
                 data_dir=args.data_dir,
                 l2_coefficient=args.l2_coefficient, momentum=args.momentum, nesterov=args.nesterov,
                 learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
@@ -149,6 +152,8 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             "mode": args.mode, "backend": "tpu_only", "worker": "worker0_only", "wait": wait,
             "seed": config.seed, "method": config.method.name, "reference": config.reference.name,
             "policy_mode": config.method.policy_mode if config.method.name == "sage_policy" else None,
+            "sage_warmup_percent": config.method.sage_warmup_percent,
+            "sage_warmup_steps": sage_warmup_steps(config),
             "alternating_first": config.method.alternating_first if config.method.name == "sage_policy"
                 and config.method.policy_mode == "alternating" else None,
             "dataset": config.data.name, "num_classes": config.data.num_classes,

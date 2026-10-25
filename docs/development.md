@@ -1,5 +1,31 @@
 # Development record
 
+## 2026-10-25: optional SGD-prefix method warmup
+
+- Added `method.sage_warmup_percent`, default 0, and shared
+  `--sage-warmup-percent` forwarding through shell suites, launcher, child and
+  configuration inspection. Original/continuous SAGE-E/L use
+  `ceil(total_steps * percent / 100)` SGD updates before full SAGE; 100 means
+  all SGD. Mixed-suite SGD/half/alternating jobs retain their existing behavior.
+- A new method wrapper uses conditional execution and a checkpointed absolute
+  update counter. SGD rounds skip alignment at runtime; zero percent returns
+  the original method object. Original SGD/SAGE and existing policy arithmetic,
+  reference construction, global BN, original-B averaging and LR schedules
+  remain unchanged. Momentum is not reset at the switch. Compilation candidates
+  do not consume real steps, source data or RNG state.
+- Reused existing policy CSV/JSON fields and lifecycle schema. New warmup names
+  include the percentage. Resume compares it and total budget; old metadata
+  missing the field implicitly means zero without rewriting the file.
+- Real-update diagnostics and extended TPU observers recognize actual SGD-prefix
+  endpoints. Full-SAGE counterfactuals remain explicitly distinct from actual
+  policy evidence. Legacy theorem probes fail closed for nonzero warmup rather
+  than silently treating SGD rounds as SAGE evidence.
+- All 189 CPU/offline regression tests passed, including eight new warmup tests.
+  CPU fixtures and configuration-only dry runs verify boundaries, branch
+  execution, model state, observer isolation and exact checkpoint recovery.
+  No SSH, server operations, production training launch, data download, commit
+  or push; actual TPU stability/performance still requires user-run experiments.
+
 ## 2026-10-25: identify decaying-rate runs in output directory names
 
 - User requested manual launch commands for cosine-to-zero and inverse_sqrt,

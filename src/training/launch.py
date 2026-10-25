@@ -29,6 +29,8 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--dataset", choices=tuple(DATASET_CLASSES))
     parser.add_argument("--alternating-first", choices=("sgd", "sage"),
                         help="First update of alternating SAGE policies; default sgd. Other methods in a suite are unchanged.")
+    parser.add_argument("--sage-warmup-percent", type=float,
+                        help="Initial percentage of updates using SGD before original/continuous SAGE; 0 (default) disables it. Other suite methods are unchanged.")
     parser.add_argument("--data-dir", help="Prepared data location, relative to the repository or absolute; iNaturalist uses the subset directory itself")
     parser.add_argument("--model", choices=("resnet50", "resnet101"))
     parser.add_argument("--data-mode", "--datamode", dest="data_mode",
@@ -92,7 +94,7 @@ def diagnostic_cli_args(args):
 
 def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    method=None, dataset=None, model=None, data_mode=None, data_dir=None, l2_coefficient=None,
-                   alternating_first=None,
+                   alternating_first=None, sage_warmup_percent=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
                    min_learning_rate=None, checkpoint_every_steps=None, checkpoints=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
@@ -121,6 +123,16 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         # baseline/continuous/half configs and their identities exactly.
         if config.method.name == "sage_policy" and config.method.policy_mode == "alternating":
             config = replace(config, method=replace(config.method, alternating_first=alternating_first))
+    if sage_warmup_percent is not None:
+        import math
+        if (isinstance(sage_warmup_percent, bool) or not math.isfinite(sage_warmup_percent)
+                or not 0 <= sage_warmup_percent <= 100):
+            raise ValueError("sage_warmup_percent must be finite and in [0, 100]")
+        # A mixed suite can share the option without changing SGD, alternating
+        # or half policies. Direct TOML configurations reject invalid combinations.
+        if config.method.name == "sage" or (config.method.name == "sage_policy"
+                and config.method.policy_mode == "continuous"):
+            config = replace(config, method=replace(config.method, sage_warmup_percent=sage_warmup_percent))
     if dataset is not None:
         directory = config.data.prepared_dir
         if (dataset == "inaturalist2021") != (config.data.name == "inaturalist2021"):

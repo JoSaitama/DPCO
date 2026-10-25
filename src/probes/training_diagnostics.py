@@ -100,6 +100,7 @@ class TrainingDiagnostics:
         self.task, self.config = task, config
         self.method = method
         self.reference_name, self.trajectory_method = reference_name, trajectory_method
+        self.warmup_steps = getattr(method, "warmup_steps", 0)
         self.audit_batches, self.objective_mode = tuple(audit_batches), objective_mode
         self._forward = jax.jit(task.evaluate)
 
@@ -169,11 +170,13 @@ class TrainingDiagnostics:
                 "overlap_policy": "fixed bank, overlap counted, no target reselection or training exclusion",
                 "scope": "finite training-audit targets; not a population or convergence certificate",
                 "sample_energy": "not measured; no per-example energy loop"}
-        if self.trajectory_method == "sage_policy":
+        if self.trajectory_method == "sage_policy" or self.warmup_steps:
             metadata.update(policy_mode=self.method.mode,
                 alternating_first=self.method.alternating_first,
                 policy_comparison="diagnostic_policy compares the active policy to SGD; legacy paired/transfer compare FULL SAGE to SGD",
                 candidate_policy="full pair uses actual endpoint only for alpha=0 or 1; policy pair uses actual endpoint at scale 1")
+            if self.warmup_steps:
+                metadata["sgd_prefix_updates"] = self.warmup_steps
         return metadata
 
     @staticmethod
@@ -211,15 +214,15 @@ class TrainingDiagnostics:
         if update_step != step + 1:
             raise ValueError("Diagnostics require exactly one actual completed update")
         alpha = None
-        if self.trajectory_method == "sage_policy":
+        if self.trajectory_method == "sage_policy" or self.warmup_steps:
             from src.methods.sage_policy import PolicyState, policy_alpha
             if (not isinstance(before.method_state, PolicyState)
                     or not isinstance(after.method_state, PolicyState)
                     or int(before.method_state.updates) != step
                     or int(after.method_state.updates) != update_step):
                 raise ValueError("Diagnostic policy phase does not match the real update")
-            alpha = float(jax.device_get(policy_alpha(
-                self.method.mode, before.method_state, self.method.alternating_first)))
+            alpha = float(jax.device_get(self.method.alpha(before.method_state) if self.warmup_steps else
+                policy_alpha(self.method.mode, before.method_state, self.method.alternating_first)))
         source_id = context.get("batch_id", f"training_update_{update_step}")
         base = {"step": step, "update_step": update_step, "source_batch_id": source_id,
                 "trajectory_method": self.trajectory_method, "reference": self.reference_name}
@@ -315,7 +318,7 @@ class TrainingDiagnostics:
         # that mismatch instead of silently testing two reconstructed updates.
         actual = scale == 1. and (actual_alpha is None or actual_alpha in (0., 1.))
         if actual:
-            if self.trajectory_method == "sage" or actual_alpha == 1.:
+            if actual_alpha == 1. or (actual_alpha is None and self.trajectory_method == "sage"):
                 ps = after.params
             else:
                 pd = after.params

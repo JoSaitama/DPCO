@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--flip-probability", type=float)
     parser.add_argument("--policy-mode", choices=("continuous", "alternating", "half"))
     parser.add_argument("--alternating-first", choices=("sgd", "sage"))
+    parser.add_argument("--sage-warmup-percent", type=float)
     args = parser.parse_args()
     config = load_config(args.config)
     if args.method is not None:
@@ -27,6 +28,8 @@ def main() -> None:
         config = replace(config, method=replace(config.method, policy_mode=args.policy_mode))
     if args.alternating_first is not None:
         config = replace(config, method=replace(config.method, alternating_first=args.alternating_first))
+    if args.sage_warmup_percent is not None:
+        config = replace(config, method=replace(config.method, sage_warmup_percent=args.sage_warmup_percent))
     if args.flip_probability is not None:
         config = replace(config, method=replace(config.method,
                                               flip_probability=args.flip_probability))

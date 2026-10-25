@@ -93,6 +93,7 @@ class ExperimentRunner:
             stored_config.setdefault("mechanism", json.loads(json.dumps(asdict(MechanismConfig()))))
             stored_config["method"].setdefault("policy_mode", "continuous")
             stored_config["method"].setdefault("alternating_first", "sgd")
+            stored_config["method"].setdefault("sage_warmup_percent", 0.0)
             # Runs created before the opt-out switch always saved checkpoints.
             stored_config["checkpoints"].setdefault("enabled", True)
             if stored_config != json.loads(json.dumps(config.as_dict())):
@@ -114,7 +115,8 @@ class ExperimentRunner:
     def _run(self, initial_state, *, resume_slot):
         c, recorder = self.config, self.recorder
         state, samples_seen, elapsed_offset = initial_state, 0, 0.
-        if c.method.name == "sage_policy" and state.method_state is None:
+        stateful_method = c.method.name == "sage_policy" or c.method.sage_warmup_percent > 0
+        if stateful_method and state.method_state is None:
             state = state._replace(method_state=self.trainer.method.initial_state())
         cumulative = dict(cumulative_reference_gain=0., cumulative_eta=0., cumulative_eta_sq=0.)
         best, best_step, last_eval = None, None, None
@@ -125,7 +127,7 @@ class ExperimentRunner:
                 # abandoned future. A corrupt observer state must fail closed.
                 self.mechanism.restore(saved.get("mechanism_state"), step=int(saved["train_state"].step))
             state, samples_seen = saved["train_state"], saved["samples_seen"]
-            if c.method.name == "sage_policy":
+            if stateful_method:
                 from src.methods.sage_policy import PolicyState
                 if (not isinstance(state.method_state, PolicyState)
                         or int(state.method_state.updates) != int(state.step)):
@@ -253,9 +255,9 @@ class ExperimentRunner:
                         train_ce=values["train_ce"], train_top1=values["train_top1"], elapsed_wall_s=stamp)
                     recorder.record("train_steps", **record)
                     policy_fields = {}
-                    if c.method.name == "sage_policy":
+                    if stateful_method:
                         alpha = float(values["policy_alpha"])
-                        policy_fields = dict(policy_mode=c.method.policy_mode, policy_alpha=alpha,
+                        policy_fields = dict(policy_mode="warmup" if c.method.sage_warmup_percent else c.method.policy_mode, policy_alpha=alpha,
                             executed_method={0.: "sgd", .5: "half_sage", 1.: "sage"}[alpha])
                         recorder.record("policy_steps", step=row_step, reference=c.reference.name, **policy_fields)
                     if not values["parameters_finite"]:

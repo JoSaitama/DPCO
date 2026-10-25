@@ -39,6 +39,7 @@ class MethodConfig:
     flip_probability: float = 0.25
     policy_mode: str = "continuous"
     alternating_first: str = "sgd"
+    sage_warmup_percent: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,14 @@ class RunConfig:
         if self.method.alternating_first != "sgd" and not (
                 self.method.name == "sage_policy" and self.method.policy_mode == "alternating"):
             raise ValueError("A nondefault alternating_first requires the alternating SAGE policy")
+        percent = self.method.sage_warmup_percent
+        if isinstance(percent, bool) or not math.isfinite(percent) or not 0 <= percent <= 100:
+            raise ValueError("sage_warmup_percent must be finite and in [0, 100]")
+        if percent and not (self.method.name == "sage" or (
+                self.method.name == "sage_policy" and self.method.policy_mode == "continuous")):
+            raise ValueError("SAGE warmup supports original sage and continuous SAGE only")
+        if percent and self.probes.enabled:
+            raise ValueError("SAGE warmup requires legacy theorem probes off; use diagnostics/mechanisms for actual-phase checks")
         if self.reference.name not in REFERENCES:
             raise ValueError(f"Unknown reference: {self.reference.name}")
         if not 0 <= self.method.flip_probability <= 1:

@@ -51,6 +51,8 @@ def make_run_name(config, *, timestamp=None):
             label += "_first_sage"
     if label in ("sage", "sage_loo", "dtv", "dtv_loo"):
         label = label.replace("_loo", "") + ("_e" if config.reference.name == "error" else "_l") + ("_loo" if label.endswith("_loo") else "")
+    if config.method.sage_warmup_percent:
+        label += "_warmup" + format(config.method.sage_warmup_percent, ".12g") + "pct"
     parts = (config.data.name, config.data.mode, config.model.name, label,
              str(config.seed), format(config.training.learning_rate, ".12g"))
     # Label newly created decaying-rate runs in logs/files/runs and lifecycle

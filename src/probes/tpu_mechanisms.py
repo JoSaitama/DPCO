@@ -101,7 +101,7 @@ class TPUMechanisms:
         return result
 
     def metadata(self):
-        return dict(schema_version=1, config_scope="mechanism", observer="read-only actual update; no training modification",
+        result = dict(schema_version=1, config_scope="mechanism", observer="read-only actual update; no training modification",
             trajectory_method=self.trajectory_label,
             state_step="completed updates BEFORE the inspected update", update_step="state step+1",
             target=None if self.target is None else self.target.info,
@@ -117,6 +117,13 @@ class TPUMechanisms:
             enable_x64=bool(jax.config.jax_enable_x64),
             sample_energy="not computed; no per-example backward loop", expectation="exact only over uniform finite bank batch index",
             windows="only complete consecutive [start,end) windows telescope; R is observed nonlinear remainder, not an L bound")
+        if getattr(self.method, "warmup_steps", 0):
+            result["sgd_prefix_updates"] = self.method.warmup_steps
+            result["warmup_semantics"] = "actual_endpoint is SGD during prefix; T1/source/moments remain full-SAGE counterfactuals"
+        return result
+
+    def _executed_sgd(self, before):
+        return self.trajectory_method == "sgd" or int(before.step) < getattr(self.method, "warmup_steps", 0)
 
     def snapshot(self):
         return dict(target_id=self.target.identity if self.target else None,
@@ -183,9 +190,15 @@ class TPUMechanisms:
         return info
 
     def _check(self, before, after, batch, stats, eta, key):
+        if getattr(self.method, "warmup_steps", 0):
+            from src.methods.sage_policy import PolicyState
+            if (not isinstance(before.method_state, PolicyState) or not isinstance(after.method_state, PolicyState)
+                    or int(before.method_state.updates) != int(before.step)
+                    or int(after.method_state.updates) != int(after.step)):
+                raise ValueError("Warmup checkpoint phase does not match completed updates")
         replay = self._call("method_replay", self.ad._replay,
             before.params, batch, before.model_state, before.method_state, key)
-        expected = stats.sgd if self.trajectory_method == "sgd" else stats.sage
+        expected = stats.sgd if self._executed_sgd(before) else stats.sage
         difference = lambda a, b: self._call("difference", self._difference, a, b)
         norm = lambda a: scalar(self._call("norm", self._norm, a))
         pd = self._call("candidate", self.ad._candidate, before.params, expected, eta)
@@ -282,7 +295,7 @@ class TPUMechanisms:
                         "endpoint_loss_error": 0., "signal_reliable": reliable}
                     # Do not label a mismatched E/L or norm-matched direction as
                     # the real executed SAGE. The real SGD endpoint is common.
-                    endpoint = ("sgd" if self.trajectory_method == "sgd" else "sage"
+                    endpoint = ("sgd" if self._executed_sgd(before) else "sage"
                         if reference == self.reference_name else None)
                     if normalization == "original" and eta == eta_actual and endpoint:
                         actual = cached("actual", eta)

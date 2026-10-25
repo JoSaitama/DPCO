@@ -41,6 +41,8 @@ class RunStatus:
         if (config.method.name == "sage_policy" and config.method.policy_mode == "alternating"
                 and config.method.alternating_first == "sage"):
             self.identity["method"] += "_first_sage"
+        if config.method.sage_warmup_percent:
+            self.identity["method"] += "_warmup" + format(config.method.sage_warmup_percent, ".12g") + "pct"
         self.terminal = None
         self._depth = 0
         self._pending_success = False

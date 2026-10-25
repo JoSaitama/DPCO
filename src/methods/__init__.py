@@ -2,7 +2,15 @@
 
 
 def create_method(name, *, reference_name="loss", flip_probability=0.25, gradient_backend="audit",
-                  policy_mode="continuous", alternating_first="sgd"):
+                  policy_mode="continuous", alternating_first="sgd", warmup_steps=0):
+    if isinstance(warmup_steps, bool) or not isinstance(warmup_steps, int) or warmup_steps < 0:
+        raise ValueError("warmup_steps must be a nonnegative integer")
+    if warmup_steps:
+        if name != "sage" and not (name == "sage_policy" and policy_mode == "continuous"):
+            raise ValueError("Warmup requires original or continuous SAGE")
+        from src.methods.sage_warmup import SAGEWarmup
+        from src.references import create_reference
+        return SAGEWarmup(create_reference(reference_name), warmup_steps, gradient_backend)
     if name == "sage_policy":
         from src.methods.sage_policy import SAGEPolicy
         from src.references import create_reference
