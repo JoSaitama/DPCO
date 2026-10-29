@@ -97,6 +97,8 @@ class L2Tests(unittest.TestCase):
                         del metadata["config"]["training"][key]
                     del metadata["config"]["method"]["negative_weight"]
                     del metadata["config"]["reference"]["beta"]
+                    for key in ("noise_type", "is_human", "noise_seed", "noise_percent", "download"):
+                        del metadata["config"]["data"][key]
                     metadata_path.write_text(json.dumps(metadata))
                 original_metadata = metadata_path.read_bytes()
                 _, source2, evaluation2, _, _ = fixture_components(c)

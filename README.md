@@ -8,11 +8,16 @@ separation. Repository code, comments and documentation use English.
 The new [DPCO + Adam implementation](docs/dpco_adam.md) supports ordinary Adam
 and a current-inclusive raw-gradient EMA reference with configurable negative
 contributions: `--method dpco --negative-weight 0` filters, `-1` flips, and other
-finite weights are accepted. The separate preset is
-`configs/tpu/dpco/imagenet100_resnet50.toml`; use
-`--methods adam dpco_filter dpco_flip --dry-run` to inspect the three-group plan.
-This implements the method/update pipeline; controlled noise and grouped
-clean/corrupted evaluation remain separate planned work.
+finite weights are accepted.
+
+[CIFAR-100N preparation and training](docs/cifar100n.md) now connects the authors'
+human annotations to the same three-method Adam flow, native 32x32 ResNets, and
+fixed clean/corrupted ordinary-CE evaluation. Use
+`python scripts/prepare_cifar100n.py --stage plan` and
+`./run_cifar100n_suite.sh --dry-run` to inspect preparation and jobs. Its human
+noise percentage is measured (40.2%), not an adjustable corruption generator.
+The existing ImageNet preset remains `configs/tpu/dpco/imagenet100_resnet50.toml`;
+synthetic noise injection into ImageNet is still separate planned work.
 
 [Opt-in TPU mechanism checks](docs/tpu_mechanisms.md) extend the real classification
 suite with both references, absolute LR candidates, a genuinely fixed train-mode

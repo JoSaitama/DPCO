@@ -113,11 +113,13 @@ mapping and input adapters remain those of the selected dataset. Removing
 `--dry-run` on a configured TPU server starts actual jobs; multi-method runs are
 sequential and use the same initial seed, augmentation and batch order.
 
-This change implements the optimizer/method comparison. It does not inject label
-noise, create clean/corrupted manifests, or add the proposed group-specific CE
-evaluation. The current real-data entry still accepts only `data.mode=clean`;
-that label means no *injected* noise and does not certify perfect original
-annotations. No formal dataset run has been executed for this implementation.
+The initial implementation covered the optimizer/method comparison. The later
+[CIFAR-100N adapter](cifar100n.md) adds official human/noise controls, local download
+and loading, small-image models and fixed-group CE in the same entry. ImageNet
+and iNaturalist still accept only `data.mode=clean`; no generic synthetic noise
+injection into those datasets is implemented. That label means no *injected*
+noise and does not certify perfect original annotations. No formal benchmark run
+has been executed as part of these code changes.
 
 ## State, numerical checks and recording
 

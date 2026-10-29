@@ -12,7 +12,7 @@ import time
 import jax
 import numpy as np
 
-from src.config import DiagnosticConfig, TrainingConfig, MechanismConfig
+from src.config import DataConfig, DiagnosticConfig, TrainingConfig, MechanismConfig
 from src.methods.base import AlignmentMethod
 from src.training.checkpoints import CheckpointStore
 from src.training.randomness import training_key
@@ -60,6 +60,10 @@ class ExperimentRunner:
         if config.reference.name == "ema":
             from src.training.recording import SCHEMAS, DPCO_SCHEMA
             schemas = {**(SCHEMAS if schemas is None else schemas), "dpco_steps": DPCO_SCHEMA}
+        if callable(getattr(evaluation, "evaluate_groups", None)):
+            from src.training.recording import SCHEMAS
+            schemas = {**(SCHEMAS if schemas is None else schemas), "group_evaluation":
+                ("step", "samples_seen", "group", "label_source", "sample_count", "ce", "top1", "top5")}
         self.sample_count = train_sample_count
         self.paths = ResultsPaths.resolve(config.results.root_dir, base_dir=base_dir).experiment(run_name or make_run_name(config))
         if reserved and not resume:
@@ -77,6 +81,7 @@ class ExperimentRunner:
             "process_index": jax.process_index(), "process_count": jax.process_count(),
             "train_sample_count": train_sample_count,
             "evaluation_mode": evaluation.mode,
+            "evaluation_selects_best": getattr(evaluation, "select_best", True),
             "state_convention": "step counts completed updates; train metrics describe parameters before that update",
             "accuracy_unit": "fraction", "rng_convention": "seed/step/stream; source owns data RNG",
             "train_timestamp_convention": "host dispatch time; window throughput synchronizes device completion",
@@ -100,6 +105,8 @@ class ExperimentRunner:
             stored_config["method"].setdefault("dpco_warmup_percent", 0.0)
             stored_config["method"].setdefault("negative_weight", -1.0)
             stored_config["reference"].setdefault("beta", 0.9)
+            for key in ("noise_type", "is_human", "noise_seed", "noise_percent", "download"):
+                stored_config["data"].setdefault(key, getattr(DataConfig("imagenet100", 100), key))
             # Runs created before the opt-out switch always saved checkpoints.
             stored_config["checkpoints"].setdefault("enabled", True)
             if stored_config != json.loads(json.dumps(config.as_dict())):
@@ -198,12 +205,21 @@ class ExperimentRunner:
             if not all(math.isfinite(float(v)) for v in values.values()):
                 raise FloatingPointError("Non-finite validation metrics")
             last_eval = {"step": int(state.step), **values}
-            improved = best is None or values["val_top1"] > best
+            improved = getattr(self.evaluation, "select_best", True) and (best is None or values["val_top1"] > best)
             if improved:
                 best, best_step = values["val_top1"], int(state.step)
+            group_rows = (self.evaluation.evaluate_groups(state)
+                          if callable(getattr(self.evaluation, "evaluate_groups", None)) else ())
+            for row in group_rows:
+                metrics = (row["ce"], row["top1"], row["top5"])
+                if row["sample_count"] > 0 and not all(v is not None and math.isfinite(float(v)) for v in metrics):
+                    raise FloatingPointError("Non-finite fixed-group metrics")
             recorder.record("evaluation", **last_eval, samples_seen=samples_seen,
                 epoch_progress=samples_seen / self.sample_count, elapsed_wall_s=elapsed(),
                 eval_duration_s=time.perf_counter() - before)
+            for row in group_rows:
+                recorder.record("group_evaluation", step=int(state.step), samples_seen=samples_seen, **row)
+                recorder.log("group_evaluation", step=int(state.step), **row)
             recorder.log("validation", **last_eval, elapsed_wall_s=elapsed())
             timing("evaluation", time.perf_counter() - before)
             return improved

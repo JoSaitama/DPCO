@@ -36,3 +36,48 @@ class EvaluationSpec:
         return {"eval_sample_count": count, "val_ce": totals["loss_sum"] / count,
                 "val_top1": totals["correct_count"] / count,
                 "val_top5": totals["top5_count"] / count}
+
+
+@dataclass(frozen=True)
+class GroupedEvaluation:
+    """Ordinary primary evaluation plus fixed, read-only label audit groups."""
+    primary: EvaluationSpec
+    groups: tuple
+    select_best: bool = False
+
+    @property
+    def mode(self):
+        return self.primary.mode + "; fixed_reference_label_groups"
+
+    def evaluate(self, state):
+        return self.primary.evaluate(state)
+
+    def evaluate_groups(self, state):
+        rows = []
+        for name, label_source, spec in self.groups:
+            if spec is None:
+                rows.append(dict(group=name, label_source=label_source, sample_count=0,
+                                 ce=None, top1=None, top5=None))
+                continue
+            values = spec.evaluate(state)
+            rows.append(dict(group=name, label_source=label_source,
+                sample_count=values["eval_sample_count"], ce=values["val_ce"],
+                top1=values["val_top1"], top5=values["val_top5"]))
+        return rows
+
+
+def cifar100n_evaluation(images, task, batch_size, batch_metrics=None):
+    from src.data.images import evaluation_batches
+    primary = EvaluationSpec(task, lambda: evaluation_batches(images, batch_size, 32),
+        images.counts["validation"], "official_cifar100_test_eval_no_model_selection", batch_metrics)
+    groups = []
+    for name, partition, labels in (("clean", "clean", "original"),
+            ("corrupted_noisy", "corrupted", "reference"),
+            ("corrupted_original", "corrupted", "original")):
+        ids = tuple(int(i) for i in images.group_indices[partition])
+        view = images.label_view(labels)
+        spec = EvaluationSpec(task,
+            lambda ids=ids, view=view: evaluation_batches(view, batch_size, 32, split="train", indices=ids),
+            len(ids), "fixed_train_eval_no_augmentation", batch_metrics) if ids else None
+        groups.append((name, labels, spec))
+    return GroupedEvaluation(primary, tuple(groups))

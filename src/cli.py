@@ -24,6 +24,12 @@ def main() -> None:
     parser.add_argument("--adam-beta1", type=float)
     parser.add_argument("--adam-beta2", type=float)
     parser.add_argument("--adam-epsilon", type=float)
+    from src.training.launch import cifar_overrides
+    parser.add_argument("--noise-type", choices=("clean100", "noisy100"))
+    parser.add_argument("--is-human", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--noise-seed", type=int)
+    parser.add_argument("--noise-percent", type=float)
+    parser.add_argument("--download", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args()
     config = load_config(args.config)
     if args.method is not None:
@@ -52,6 +58,12 @@ def main() -> None:
     training = {name: getattr(args, name) for name in ("optimizer", "adam_beta1", "adam_beta2", "adam_epsilon")
                 if getattr(args, name) is not None}
     config = replace(config, training=replace(config.training, **training))
+    noise = {key: value for key, value in cifar_overrides(args).items() if value is not None}
+    if args.noise_type is not None:
+        noise["mode"] = "clean" if args.noise_type == "clean100" else "noisy"
+    if args.noise_percent is None and any(v is not None for v in (args.noise_type, args.is_human, args.noise_seed)):
+        noise["noise_percent"] = 0. if noise.get("noise_type", config.data.noise_type) == "clean100" else None
+    config = replace(config, data=replace(config.data, **noise))
     config.validate()
     print(json.dumps(config.as_dict(), indent=2))
 

@@ -1,0 +1,63 @@
+# Untuned native 32x32 pilot. Official CIFAR-100N human labels, NOT random 40% noise.
+seed = 42
+global_batch_size = 128
+
+[data]
+name = "cifar100n"
+num_classes = 100
+image_size = 32
+mode = "noisy"
+prepared_dir = "../data/cifar100n"
+noise_type = "noisy100"
+is_human = true
+# This checks the loaded mismatch percentage; it never changes human labels.
+noise_percent = 40.2
+download = false
+
+[model]
+name = "cifar_resnet34"
+initialization = "random"
+precision = "float32"
+
+[method]
+name = "dpco"
+negative_weight = -1.0
+
+[reference]
+name = "ema"
+beta = 0.9
+
+[training]
+optimizer = "adam"
+learning_rate = 0.001
+total_steps = 100
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+adam_epsilon = 1e-8
+
+[execution]
+visible_chips = "0,1,2,3"
+chips_per_process_bounds = "2,2,1"
+port = 8476
+startup_timeout_s = 180
+gradient_backend = "jvp"
+
+[results]
+root_dir = "results"
+
+[logging]
+mode = "steps"
+interval = 5
+csv_flush_steps = 50
+timing_window_steps = 50
+
+[evaluation]
+mode = "epochs"
+interval = 1.0
+
+[checkpoints]
+latest_every_steps = 100
+at_epoch_end = false
+
+[probes]
+enabled = false

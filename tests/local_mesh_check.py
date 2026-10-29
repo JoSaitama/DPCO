@@ -118,6 +118,30 @@ def main():
             np.testing.assert_allclose(metrics["dpco_negative_count"], expected_metrics["dpco_negative_count"])
             assert int(actual.method_state.updates) == t + 1
             assert int(actual.optimizer_state.count) == t + 1
+    # New native-image backbone: global convolution/BatchNorm, EMA and Adam
+    # must agree with a dense full-Jacobian oracle on the same logical batch.
+    from src.models.cifar_resnet import CifarResNet
+    from src.models.resnet import initialize, model_adapter
+    native_model = CifarResNet((1,), 100, num_filters=2)
+    native_params, native_buffers = initialize(native_model, 19, 32)
+    native_task = ClassificationTask(model_adapter(native_model, train=True), 100)
+    native_batch = classification_batch(np.random.default_rng(5).normal(size=(4, 32, 32, 3)).astype(np.float32),
+                                         np.array([0, 1, 2, 3], np.int32))
+    native_updater = AdamUpdate(.001)
+    for weight in (0., -1.):
+        oracle = HistoricalDPCO(.85, weight, "audit")
+        method = HistoricalDPCO(.85, weight, "jvp")
+        native_mesh = LocalMeshTrainer(native_task, method, native_updater, local_mesh(jax.local_devices()))
+        expected = TrainState(native_params, native_buffers, oracle.initial_state(native_params),
+                              native_updater.init(native_params))
+        actual = jax.device_put(expected, native_mesh.replicated)
+        dense_step = Trainer(native_task, oracle, native_updater).compile_step()
+        mesh_step = native_mesh.compile_step()
+        for t in range(2):
+            expected, _ = dense_step(expected, native_batch, jax.random.key(t))
+            actual, _ = mesh_step(actual, native_batch, jax.random.key(t))
+            for a, b in zip(jax.tree_util.tree_leaves(expected), jax.tree_util.tree_leaves(actual)):
+                np.testing.assert_allclose(a, b, rtol=3e-4, atol=3e-6)
     print("PASS: two-device global BN, full-gradient oracle, legacy updates, DPCO policies and EMA/Adam weights")
 
 

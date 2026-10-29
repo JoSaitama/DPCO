@@ -10,7 +10,7 @@ from src.probes.mechanism_config import MechanismConfig
 
 METHODS = ("sgd", "adam", "dpco", "dpco_loo", "dtv", "dtv_loo", "random_flip", "dpco_policy")
 REFERENCES = ("loss", "error", "correct", "ema")
-DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000}
+DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000, "cifar100n": 100}
 INATURALIST_PREPARED_DIR = "../data/inaturalist2021_full_t140000_v20000_s42"
 
 
@@ -24,6 +24,11 @@ class DataConfig:
     hf_repo_id: str = "ILSVRC/imagenet-1k"
     hf_revision: str = "49e2ee26f3810fb5a7536bbf732a7b07389a47b5"
     prepared_dir: str = "../data"
+    noise_type: str | None = None
+    is_human: bool = True
+    noise_seed: int = 0
+    noise_percent: float | None = None
+    download: bool = False
 
 
 @dataclass(frozen=True)
@@ -206,7 +211,34 @@ class RunConfig:
             raise ValueError("num_classes must match the selected dataset")
         if self.data.name == "imagenet100" and not self.data.class_manifest:
             raise ValueError("imagenet100 requires a fixed class_manifest path")
-        if self.model.name not in ("resnet50", "resnet101"):
+        if not isinstance(self.data.is_human, bool) or not isinstance(self.data.download, bool):
+            raise ValueError("is_human and download must be boolean")
+        if (isinstance(self.data.noise_seed, bool) or not isinstance(self.data.noise_seed, int)
+                or not 0 <= self.data.noise_seed < 2**32):
+            raise ValueError("noise_seed must be an integer in [0, 2**32)")
+        expected_noise = self.data.noise_percent
+        if expected_noise is not None and (isinstance(expected_noise, bool)
+                or not math.isfinite(expected_noise) or not 0 <= expected_noise <= 100):
+            raise ValueError("noise_percent must be finite and in [0, 100]; it checks the actual rate")
+        cifar_models = ("cifar_resnet18", "cifar_resnet34")
+        if self.data.name == "cifar100n":
+            if self.data.noise_type not in ("clean100", "noisy100"):
+                raise ValueError("CIFAR-100N noise_type must be clean100 or noisy100")
+            expected_mode = "clean" if self.data.noise_type == "clean100" else "noisy"
+            if self.data.mode != expected_mode:
+                raise ValueError("CIFAR-100N data.mode must match noise_type")
+            if self.data.image_size != 32 or self.model.name not in cifar_models:
+                raise ValueError("CIFAR-100N requires image_size=32 and a cifar_resnet18/34 model")
+            if self.data.is_human and self.data.noise_seed != 0:
+                raise ValueError("Human CIFAR-100N labels are fixed; noise_seed applies only to synthetic labels")
+            if self.data.noise_type == "clean100" and expected_noise not in (None, 0):
+                raise ValueError("clean100 has 0 percent noise")
+            if self.probes.enabled or self.diagnostics.enabled or self.mechanism.enabled:
+                raise ValueError("CIFAR-100N uses grouped evaluation; legacy observers must be off")
+        elif (self.data.noise_type is not None or expected_noise is not None or not self.data.is_human
+                or self.data.noise_seed != 0 or self.data.download or self.model.name in cifar_models):
+            raise ValueError("CIFAR noise controls/models require dataset=cifar100n")
+        if self.model.name not in ("resnet50", "resnet101", *cifar_models):
             raise ValueError(f"Unsupported model: {self.model.name}")
         if self.model.initialization != "random":
             raise ValueError("The current optimizer comparison uses random initialization, not pretrained weights")

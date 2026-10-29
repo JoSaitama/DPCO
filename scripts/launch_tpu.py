@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.config import load_config
 from src.training.launch import (absolute_path, add_overrides, diagnostic_cli_args,
-                                 diagnostic_overrides, dpco_overrides, dpco_cli_args, resolve_config)
+                                 diagnostic_overrides, dpco_overrides, dpco_cli_args, cifar_overrides, cifar_cli_args, resolve_config)
 from src.training.results import ResultsPaths, make_run_name
 from src.training.schedules import dpco_warmup_steps
 from src.training.runtime import configure_worker0
@@ -52,6 +52,7 @@ def plan_job(args, path, config, method):
         command.append("--nesterov" if args.nesterov else "--no-nesterov")
     if args.checkpoints is not None:
         command.append("--checkpoints" if args.checkpoints else "--no-checkpoints")
+    command.extend(cifar_cli_args(args))
     command.extend(dpco_cli_args(args))
     command.extend(diagnostic_cli_args(args))
     command.extend(mechanism_cli_args(args))
@@ -142,7 +143,7 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
                 min_learning_rate=args.min_learning_rate, checkpoint_every_steps=args.checkpoint_every_steps,
                 checkpoints=args.checkpoints,
                 eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
-                **diagnostic_overrides(args), **dpco_overrides(args), **mechanism_overrides(args))
+                **diagnostic_overrides(args), **dpco_overrides(args), **cifar_overrides(args), **mechanism_overrides(args))
             jobs.append((config, method))
     if args.resume and not jobs[0][0].checkpoints.enabled:
         parser.error("Resume requires checkpoints enabled; --no-checkpoints runs cannot be resumed")
@@ -160,6 +161,9 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             "dpco_warmup_steps": dpco_warmup_steps(config),
             "alternating_first": config.method.alternating_first if config.method.name == "dpco_policy"
                 and config.method.policy_mode == "alternating" else None,
+            "noise_type": config.data.noise_type, "is_human": config.data.is_human,
+            "noise_seed": config.data.noise_seed, "expected_noise_percent": config.data.noise_percent,
+            "download_enabled": config.data.download,
             "dataset": config.data.name, "num_classes": config.data.num_classes,
             "model": config.model.name, "data_mode": config.data.mode,
             "data_dir": str(absolute_path(config.data.prepared_dir, ROOT).resolve()),

@@ -34,15 +34,24 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--adam-beta1", type=float)
     parser.add_argument("--adam-beta2", type=float)
     parser.add_argument("--adam-epsilon", type=float)
+    parser.add_argument("--noise-type", choices=("clean100", "noisy100"),
+                        help="CIFAR-100N official clean/original or released human-label mode")
+    parser.add_argument("--is-human", action=argparse.BooleanOptionalAction, default=None,
+                        help="Use released human labels; --no-is-human samples the official empirical transition matrix")
+    parser.add_argument("--noise-seed", type=int, help="Synthetic labels only; official default 0")
+    parser.add_argument("--noise-percent", "--expected-noise-percent", dest="noise_percent", type=float,
+                        help="Expected ACTUAL mismatch percentage (0..100), checked after loading; never generates noise")
+    parser.add_argument("--download", action=argparse.BooleanOptionalAction, default=None,
+                        help="CIFAR-100N only: allow missing pinned sources to download before preparation")
     parser.add_argument("--dataset", choices=tuple(DATASET_CLASSES))
     parser.add_argument("--alternating-first", choices=("sgd", "dpco"),
                         help="First update of alternating DPCO policies; default sgd. Other methods in a suite are unchanged.")
     parser.add_argument("--dpco-warmup-percent", type=float,
                         help="Initial percentage of updates using SGD before original/continuous DPCO; 0 (default) disables it. Other suite methods are unchanged.")
     parser.add_argument("--data-dir", help="Prepared data location, relative to the repository or absolute; iNaturalist uses the subset directory itself")
-    parser.add_argument("--model", choices=("resnet50", "resnet101"))
+    parser.add_argument("--model", choices=("resnet50", "resnet101", "cifar_resnet18", "cifar_resnet34"))
     parser.add_argument("--data-mode", "--datamode", dest="data_mode",
-                        help="Only clean is implemented; mismatch modes are reserved")
+                        help="ImageNet/iNaturalist: clean only; CIFAR-100N clean/noisy must match noise-type")
     parser.add_argument("--l2-coefficient", type=float,
                         help="Coupled L2 on matrix/kernel weights after sample aggregation; default 0 (off)")
     parser.add_argument("--momentum", type=float, help="Momentum coefficient in [0, 1); default 0 (off)")
@@ -73,6 +82,26 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--diagnostic-lr-scales", nargs="+", type=float)
     parser.add_argument("--diagnostic-audit-batches", type=int)
     parser.add_argument("--diagnostic-audit-seed", type=int)
+
+
+CIFAR_OPTIONS = ("noise_type", "is_human", "noise_seed", "noise_percent", "download")
+
+
+def cifar_overrides(args):
+    return {name: getattr(args, name, None) for name in CIFAR_OPTIONS}
+
+
+def cifar_cli_args(args):
+    command = []
+    for name, value in cifar_overrides(args).items():
+        if value is None:
+            continue
+        flag = "--" + name.replace("_", "-")
+        if isinstance(value, bool):
+            command.append(flag if value else "--no-" + flag[2:])
+        else:
+            command.extend((flag, str(value)))
+    return command
 
 
 DPCO_OPTIONS = ("optimizer", "reference_beta", "negative_weight", "adam_beta1", "adam_beta2", "adam_epsilon")
@@ -118,6 +147,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
                    min_learning_rate=None, optimizer=None, reference_beta=None, negative_weight=None,
                    adam_beta1=None, adam_beta2=None, adam_epsilon=None,
+                   noise_type=None, is_human=None, noise_seed=None, noise_percent=None, download=None,
                    checkpoint_every_steps=None, checkpoints=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
                    diagnostics=None, diagnostic_steps=None, diagnostic_update_check=None,
@@ -176,16 +206,39 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
             config = replace(config, method=replace(config.method, dpco_warmup_percent=dpco_warmup_percent))
     if dataset is not None:
         directory = config.data.prepared_dir
-        if (dataset == "inaturalist2021") != (config.data.name == "inaturalist2021"):
-            directory = INATURALIST_PREPARED_DIR if dataset == "inaturalist2021" else "../data"
+        if dataset != config.data.name:
+            if dataset == "cifar100n":
+                directory = "../data/cifar100n"
+            elif dataset == "inaturalist2021":
+                directory = INATURALIST_PREPARED_DIR
+            elif config.data.name in ("inaturalist2021", "cifar100n"):
+                directory = "../data"
         manifest = config.data.class_manifest
-        if dataset == "inaturalist2021":
+        if dataset in ("inaturalist2021", "cifar100n"):
             manifest = None
         elif dataset == "imagenet100" and manifest is None:
             manifest = "configs/manifests/imagenet100_classes.txt"
-        config = replace(config, data=replace(config.data, name=dataset,
-            num_classes=DATASET_CLASSES[dataset], prepared_dir=directory,
-            class_manifest=manifest))
+        changes = dict(name=dataset, num_classes=DATASET_CLASSES[dataset],
+                       prepared_dir=directory, class_manifest=manifest)
+        if dataset == "cifar100n" and config.data.name != "cifar100n":
+            changes.update(image_size=32, mode="noisy", noise_type="noisy100")
+            if model is None:
+                config = replace(config, model=replace(config.model, name="cifar_resnet34"))
+        elif dataset != "cifar100n" and config.data.name == "cifar100n":
+            changes.update(image_size=224, mode="clean", noise_type=None, is_human=True,
+                           noise_seed=0, noise_percent=None, download=False)
+            if model is None:
+                config = replace(config, model=replace(config.model, name="resnet50"))
+        config = replace(config, data=replace(config.data, **changes))
+    noise_changes = {key: value for key, value in (("noise_type", noise_type), ("is_human", is_human),
+        ("noise_seed", noise_seed), ("noise_percent", noise_percent), ("download", download)) if value is not None}
+    if noise_type is not None and config.data.name == "cifar100n" and data_mode is None:
+        noise_changes["mode"] = "clean" if noise_type == "clean100" else "noisy"
+    if (config.data.name == "cifar100n" and noise_percent is None
+            and any(value is not None for value in (noise_type, is_human, noise_seed))):
+        active_type = noise_changes.get("noise_type", config.data.noise_type)
+        noise_changes["noise_percent"] = 0. if active_type == "clean100" else None
+    config = replace(config, data=replace(config.data, **noise_changes))
     if data_dir is not None:
         config = replace(config, data=replace(config.data, prepared_dir=data_dir))
     if model is not None:
@@ -210,7 +263,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     elif eval_every_epochs is not None:
         config = replace(config, evaluation=replace(config.evaluation,
             mode="epochs", interval=eval_every_epochs))
-    if config.data.mode != "clean":
+    if config.data.mode != "clean" and config.data.name != "cifar100n":
         raise ValueError("Only data-mode=clean is implemented; mismatch modes are reserved, not silently simulated")
     if steps is not None:
         if steps <= 0:

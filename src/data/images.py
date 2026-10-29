@@ -66,6 +66,7 @@ def transform(image, image_size, *, rng=None):
 class ImageBatchSource:
     def __init__(self, images, batch_size, image_size, seed):
         self.images, self.batch_size, self.image_size, self.seed = images, batch_size, image_size, seed
+        self.transform = getattr(images, "transform", transform)
         self.count = images.counts["train"]
         if self.count < batch_size:
             raise ValueError("Training data must contain at least one complete batch")
@@ -87,7 +88,7 @@ class ImageBatchSource:
         for index in indices:
             image, label = self.images.get("train", index)
             rng = np.random.default_rng(np.random.SeedSequence([self.seed, self.epoch, int(index), 1]))
-            pixels.append(transform(image, self.image_size, rng=rng))
+            pixels.append(self.transform(image, self.image_size, rng=rng))
             labels.append(label)
         return ClassificationBatch(np.stack(pixels), np.array(labels, np.int32), np.ones(len(labels), bool))
 
@@ -121,5 +122,5 @@ def evaluation_batches(images, batch_size, image_size, *, split="validation", in
         labels, mask = np.zeros(batch_size, np.int32), np.zeros(batch_size, bool)
         for offset, index in enumerate(ids):
             image, label = images.get(split, index)
-            pixels[offset], labels[offset], mask[offset] = transform(image, image_size), label, True
+            pixels[offset], labels[offset], mask[offset] = getattr(images, "transform", transform)(image, image_size), label, True
         yield ClassificationBatch(pixels, labels, mask)
