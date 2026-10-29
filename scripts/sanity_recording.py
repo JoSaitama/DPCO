@@ -32,7 +32,7 @@ def exercise(output_root, config_path, enable_probes):
     from src.training.evaluation import EvaluationSpec
     from src.training.experiment import ExperimentRunner
     from src.training.updates import make_updater
-    from src.training.schedules import sage_warmup_steps
+    from src.training.schedules import dpco_warmup_steps
 
     config = load_config(config_path)
     config = replace(config, results=ResultsConfig(str(output_root)),
@@ -68,7 +68,7 @@ def exercise(output_root, config_path, enable_probes):
                                          flip_probability=config.method.flip_probability,
                                          policy_mode=config.method.policy_mode,
                                          alternating_first=config.method.alternating_first,
-                                         warmup_steps=sage_warmup_steps(config)),
+                                         warmup_steps=dpco_warmup_steps(config)),
                       make_updater(config.training))
     evaluation = EvaluationSpec(task, lambda: iter([source.batch]), 3, "deterministic_linear")
     def audit(p):
@@ -97,7 +97,7 @@ def exercise(output_root, config_path, enable_probes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/imagenet100_resnet50_sage_e.toml")
+    parser.add_argument("--config", default="configs/imagenet100_resnet50_dpco_e.toml")
     parser.add_argument("--output-root", type=Path)
     parser.add_argument("--probes", action="store_true")
     args = parser.parse_args()
@@ -108,7 +108,7 @@ def main():
         root = args.output_root if args.output_root.is_absolute() else ROOT / args.output_root
         exercise(root, config_path, args.probes)
     else:
-        with TemporaryDirectory(prefix="sage-recording-sanity-") as directory:
+        with TemporaryDirectory(prefix="dpco-recording-sanity-") as directory:
             exercise(Path(directory), config_path, args.probes)
         print("Temporary sanity artifacts removed; pass --output-root to retain them.")
 

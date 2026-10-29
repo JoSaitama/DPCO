@@ -20,16 +20,16 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(config.results.root_dir, "results")
                 self.assertEqual(config.global_batch_size, 256)
 
-    def test_sage_e_presets_match_sgd_comparison_settings(self):
-        for path in sorted((ROOT / "configs").glob("*_sage_e.toml")):
+    def test_dpco_e_presets_match_sgd_comparison_settings(self):
+        for path in sorted((ROOT / "configs").glob("*_dpco_e.toml")):
             with self.subTest(path=path.name):
-                sage = load_config(path)
-                sgd = load_config(path.with_name(path.name.replace("_sage_e", "")))
-                self.assertEqual(sage.method.name, "sage")
-                self.assertEqual(sage.reference.name, "error")
+                dpco = load_config(path)
+                sgd = load_config(path.with_name(path.name.replace("_dpco_e", "")))
+                self.assertEqual(dpco.method.name, "dpco")
+                self.assertEqual(dpco.reference.name, "error")
                 self.assertEqual(sgd.method.name, "sgd")
                 for field in ("data", "model", "training", "results", "seed", "global_batch_size"):
-                    self.assertEqual(getattr(sage, field), getattr(sgd, field))
+                    self.assertEqual(getattr(dpco, field), getattr(sgd, field))
 
     def test_results_root_cannot_be_empty(self):
         config = load_config(ROOT / "configs/imagenet100_resnet50.toml")
@@ -47,7 +47,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_common_reference_probes_do_not_silently_cover_sgd_or_loo(self):
         config = load_config(ROOT / "configs/imagenet100_resnet50.toml")
-        for method in ("sgd", "sage_loo"):
+        for method in ("sgd", "dpco_loo"):
             with self.subTest(method=method), self.assertRaises(ValueError):
                 replace(config, method=MethodConfig(method), probes=ProbeConfig(enabled=True)).validate()
 
@@ -80,6 +80,8 @@ class ConfigTests(unittest.TestCase):
         config = load_config(ROOT / "configs/imagenet100_resnet50.toml")
         for name in METHODS:
             candidate = replace(config, method=MethodConfig(name))
+            if name == "adam":
+                candidate = replace(candidate, training=replace(candidate.training, optimizer="adam"))
             candidate.validate()
             self.assertEqual(candidate.data, config.data)
             self.assertEqual(candidate.model, config.model)

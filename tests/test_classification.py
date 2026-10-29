@@ -34,7 +34,7 @@ class ClassificationTests(unittest.TestCase):
         short = classification_batch(jnp.array([[1., 0.], [0., 2.]]), jnp.array([0, 2]))
         padded = classification_batch(jnp.array([[1., 0.], [jnp.nan, jnp.nan], [0., 2.]]),
                                       jnp.array([0, 999, 2]), jnp.array([True, False, True]))
-        for name in ("sgd", "sage", "sage_loo", "dtv", "dtv_loo"):
+        for name in ("sgd", "dpco", "dpco_loo", "dtv", "dtv_loo"):
             method = create_method(name)
             left = method.compute_direction(task, params, short).direction
             right = method.compute_direction(task, params, padded).direction

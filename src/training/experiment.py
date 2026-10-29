@@ -57,6 +57,9 @@ class ExperimentRunner:
             from src.training.recording import SCHEMAS
             from src.probes.tpu_mechanisms import SCHEMAS as MECHANISM_SCHEMAS
             schemas = {**SCHEMAS, **MECHANISM_SCHEMAS}
+        if config.reference.name == "ema":
+            from src.training.recording import SCHEMAS, DPCO_SCHEMA
+            schemas = {**(SCHEMAS if schemas is None else schemas), "dpco_steps": DPCO_SCHEMA}
         self.sample_count = train_sample_count
         self.paths = ResultsPaths.resolve(config.results.root_dir, base_dir=base_dir).experiment(run_name or make_run_name(config))
         if reserved and not resume:
@@ -85,7 +88,8 @@ class ExperimentRunner:
             stored_config = stored_metadata["config"]
             # Older checkpoints predate optional update controls and used the off path.
             # Compare its implicit default without rewriting original metadata.
-            for key in ("l2_coefficient", "momentum", "nesterov", "lr_schedule", "min_learning_rate"):
+            for key in ("l2_coefficient", "momentum", "nesterov", "lr_schedule", "min_learning_rate",
+                        "optimizer", "adam_beta1", "adam_beta2", "adam_epsilon"):
                 stored_config["training"].setdefault(key, getattr(TrainingConfig(), key))
             # Legacy runs implicitly had diagnostics disabled. Do not enable an
             # observer during resume or reinterpret their existing CSV records.
@@ -93,7 +97,9 @@ class ExperimentRunner:
             stored_config.setdefault("mechanism", json.loads(json.dumps(asdict(MechanismConfig()))))
             stored_config["method"].setdefault("policy_mode", "continuous")
             stored_config["method"].setdefault("alternating_first", "sgd")
-            stored_config["method"].setdefault("sage_warmup_percent", 0.0)
+            stored_config["method"].setdefault("dpco_warmup_percent", 0.0)
+            stored_config["method"].setdefault("negative_weight", -1.0)
+            stored_config["reference"].setdefault("beta", 0.9)
             # Runs created before the opt-out switch always saved checkpoints.
             stored_config["checkpoints"].setdefault("enabled", True)
             if stored_config != json.loads(json.dumps(config.as_dict())):
@@ -110,14 +116,22 @@ class ExperimentRunner:
 
     def run(self, initial_state, *, resume_slot="latest"):
         with self.recorder.status.monitor():
-            return self._run(initial_state, resume_slot=resume_slot)
+            try:
+                return self._run(initial_state, resume_slot=resume_slot)
+            finally:
+                # Initialization/resume validation can fail before the loop's try.
+                if not self.recorder.log_file.closed:
+                    self.recorder.close()
 
     def _run(self, initial_state, *, resume_slot):
         c, recorder = self.config, self.recorder
         state, samples_seen, elapsed_offset = initial_state, 0, 0.
-        stateful_method = c.method.name == "sage_policy" or c.method.sage_warmup_percent > 0
+        stateful_method = c.method.name == "dpco_policy" or c.method.dpco_warmup_percent > 0
         if stateful_method and state.method_state is None:
             state = state._replace(method_state=self.trainer.method.initial_state())
+        historical = c.reference.name == "ema"
+        if historical and state.method_state is None:
+            state = state._replace(method_state=self.trainer.method.initial_state(state.params))
         cumulative = dict(cumulative_reference_gain=0., cumulative_eta=0., cumulative_eta_sq=0.)
         best, best_step, last_eval = None, None, None
         if self.resume:
@@ -128,12 +142,17 @@ class ExperimentRunner:
                 self.mechanism.restore(saved.get("mechanism_state"), step=int(saved["train_state"].step))
             state, samples_seen = saved["train_state"], saved["samples_seen"]
             if stateful_method:
-                from src.methods.sage_policy import PolicyState
+                from src.methods.dpco_policy import PolicyState
                 if (not isinstance(state.method_state, PolicyState)
                         or int(state.method_state.updates) != int(state.step)):
                     raise ValueError("Policy checkpoint phase does not match completed updates")
             if state.optimizer_state is None and getattr(self.trainer.updater, "momentum", 0) != 0:
                 raise ValueError("Momentum checkpoint is missing optimizer state")
+            if historical:
+                self.trainer.method.validate_state(state.method_state, state.params, state.step)
+            validate_optimizer = getattr(self.trainer.updater, "validate_state", None)
+            if callable(validate_optimizer):
+                validate_optimizer(state.optimizer_state, state.params, state.step)
             self.source.restore(saved["source_state"])
             cumulative, best, best_step = saved["cumulative"], saved["best"], saved["best_step"]
             last_eval, elapsed_offset = saved["last_eval"], saved["elapsed_wall_s"]
@@ -143,6 +162,11 @@ class ExperimentRunner:
         if state.optimizer_state is None and callable(initializer):
             # Establish a stable state tree before warmup and the initial save.
             state = state._replace(optimizer_state=initializer(state.params))
+        if historical:
+            self.trainer.method.validate_state(state.method_state, state.params, state.step)
+        validator = getattr(self.trainer.updater, "validate_state", None)
+        if callable(validator):
+            validator(state.optimizer_state, state.params, state.step)
         start = time.perf_counter()
         elapsed = lambda: elapsed_offset + time.perf_counter() - start
         step = int(state.step)
@@ -257,9 +281,17 @@ class ExperimentRunner:
                     policy_fields = {}
                     if stateful_method:
                         alpha = float(values["policy_alpha"])
-                        policy_fields = dict(policy_mode="warmup" if c.method.sage_warmup_percent else c.method.policy_mode, policy_alpha=alpha,
-                            executed_method={0.: "sgd", .5: "half_sage", 1.: "sage"}[alpha])
+                        policy_fields = dict(policy_mode="warmup" if c.method.dpco_warmup_percent else c.method.policy_mode, policy_alpha=alpha,
+                            executed_method={0.: "sgd", .5: "half_dpco", 1.: "dpco"}[alpha])
                         recorder.record("policy_steps", step=row_step, reference=c.reference.name, **policy_fields)
+                    if historical:
+                        fields = {key: value for key, value in values.items() if key.startswith("dpco_")}
+                        if not all(math.isfinite(float(value)) for value in fields.values()):
+                            raise FloatingPointError(f"Non-finite DPCO statistics at step {row_step}")
+                        recorder.record("dpco_steps", step=row_step,
+                            valid_batch_size=values["valid_batch_size"], **fields)
+                    if not values.get("state_finite", True):
+                        raise FloatingPointError(f"Non-finite method/optimizer state at step {row_step}")
                     if not values["parameters_finite"]:
                         raise FloatingPointError(f"Non-finite model parameters at step {row_step}")
                     if not all(math.isfinite(float(values[key])) for key in ("train_ce", "train_top1")):
@@ -275,7 +307,7 @@ class ExperimentRunner:
                                 negative_count=values["theory_negative_count"], flip_count=values["theory_flip_count"],
                                 reference_valid=values["theory_reference_valid"], delta=delta, eta_delta=eta * delta,
                                 reference_projection_sgd=values["theory_reference_projection_sgd"],
-                                reference_projection_sage=values["theory_reference_projection_sage"])
+                                reference_projection_dpco=values["theory_reference_projection_dpco"])
                     cumulative["cumulative_eta"] += eta
                     cumulative["cumulative_eta_sq"] += eta ** 2
                     if c.probes.enabled and c.probes.theorem3:

@@ -16,8 +16,8 @@ sys.path.insert(0, str(ROOT))
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", "--seeds", dest="seeds", nargs="+", type=int, default=[5])
-    parser.add_argument("--methods", nargs="+", choices=("sgd", "sage_e", "sage_l"),
-                        default=["sgd", "sage_e", "sage_l"])
+    parser.add_argument("--methods", nargs="+", choices=("sgd", "dpco_e", "dpco_l"),
+                        default=["sgd", "dpco_e", "dpco_l"])
     parser.add_argument("--lrs", nargs="+", type=float, default=[.01, .1])
     parser.add_argument("--schedules", nargs="+", choices=("constant", "cosine", "inverse_sqrt"), default=["constant"])
     parser.add_argument("--min-lr", type=float, default=0.)

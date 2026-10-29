@@ -15,8 +15,8 @@ class DirectionTests(unittest.TestCase):
     def test_batch_mean_and_loo_have_distinct_analytic_directions(self):
         task = QuadraticTask()
         params = {"x": jnp.zeros(1)}
-        expected = {"sgd": 1/6, "sage": 7/6, "dtv": 2/3,
-                    "sage_loo": -1/6, "dtv_loo": 0.}
+        expected = {"sgd": 1/6, "dpco": 7/6, "dtv": 2/3,
+                    "dpco_loo": -1/6, "dtv_loo": 0.}
         for name, value in expected.items():
             with self.subTest(method=name):
                 result = create_method(name).compute_direction(task, params, scalar_batch())
@@ -51,7 +51,7 @@ class DirectionTests(unittest.TestCase):
             method = create_method("random_flip", reference_name="unused", flip_probability=p)
             result = method.compute_direction(task, params, batch, rng_key=training_key(7, 0))
             np.testing.assert_allclose(result.direction["x"], sign * base, atol=1e-6)
-        self.assertFalse(np.allclose(-base, create_method("sage").compute_direction(task, params, batch).direction["x"]))
+        self.assertFalse(np.allclose(-base, create_method("dpco").compute_direction(task, params, batch).direction["x"]))
 
     def test_random_probability_and_same_seed_reproducibility(self):
         method = RandomFlip(0.25)
@@ -85,4 +85,4 @@ class DirectionTests(unittest.TestCase):
         self.assertIsNotNone(create_method("sgd", reference_name="not_needed"))
         self.assertIsNotNone(create_method("random_flip", reference_name="not_needed"))
         with self.assertRaises(ValueError):
-            create_method("sage", reference_name="not_implemented")
+            create_method("dpco", reference_name="not_implemented")

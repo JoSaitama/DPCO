@@ -27,17 +27,17 @@ SCHEMAS = {
         "model_state_max_abs_error", "replayed_model_state_max_abs_error", "parameter_dtype", "compute_dtype",
         "matmul_precision", "absolute_tolerance", "relative_tolerance", "tolerance_supported", "reliable", "finite"),
     "mechanism_t1": (*BASE, "reference", "reference_valid", "error_count", "flip_count", "negative_count",
-        "reference_delta", "delta_formula", "identity_residual", "score_min_abs", "norm_sgd_sq", "norm_sage_sq"),
+        "reference_delta", "delta_formula", "identity_residual", "score_min_abs", "norm_sgd_sq", "norm_dpco_sq"),
     "mechanism_transfer": (*BASE, "reference", "scope", "reference_delta", "target_lambda", "mismatch",
         "transfer_residual", "h_norm_sq"),
     "mechanism_pairs": (*BASE, "reference", "objective", "buffer_semantics", "candidate_kind", "actual_endpoint",
-        "lr_kind", "lr_scale", "probe_lr", "sage_probe_lr", "normalization", "defined", "undefined_reason",
-        "reference_valid", "j_initial", "j_sgd", "j_sage", "difference", "objective_gain", "effective_objective_gain",
+        "lr_kind", "lr_scale", "probe_lr", "dpco_probe_lr", "normalization", "defined", "undefined_reason",
+        "reference_valid", "j_initial", "j_sgd", "j_dpco", "difference", "objective_gain", "effective_objective_gain",
         "difference_over_lr", "first_order_residual", "endpoint_loss_error", "loss_resolution",
         "numeric_checked", "update_reliable", "signal_reliable", "finite"),
     "mechanism_moments": (*BASE, "reference", "estimator", "bank_batch_count", "probability_sum", "standard_error",
-        "mean_h_dot_sage", "mean_h_dot_sgd", "mean_delta", "mean_lambda", "mean_mismatch",
-        "mean_norm_sage_sq", "mean_norm_sgd_sq", "mean_gd_h_l2_error", "mean_gd_h_relative_error", "h_norm_sq"),
+        "mean_h_dot_dpco", "mean_h_dot_sgd", "mean_delta", "mean_lambda", "mean_mismatch",
+        "mean_norm_dpco_sq", "mean_norm_sgd_sq", "mean_gd_h_l2_error", "mean_gd_h_relative_error", "h_norm_sq"),
     "mechanism_windows": (*BASE, "window_start", "window_end", "window_count", "window_complete", "fa_before",
         "fa_after", "P", "R", "displacement_norm_sq", "cumulative_P", "cumulative_R", "endpoint_loss_difference",
         "identity_residual", "identity_tolerance", "identity_pass", "learning_rate", "cumulative_eta", "cumulative_eta_sq"),
@@ -61,13 +61,17 @@ class TPUMechanisms:
     def __init__(self, task, method, config, *, reference_name, trajectory_method,
                  bank_batches=(), fixed_buffers=None, signature="explicit_task_v1", compute_dtype="float32"):
         setup_start = time.perf_counter()
-        if trajectory_method not in ("sgd", "sage") or reference_name not in ("error", "loss"):
-            raise ValueError("Extended observers cover original SGD/SAGE E/L, not policy updates")
+        if trajectory_method not in ("sgd", "dpco") or reference_name not in ("error", "loss", "correct"):
+            raise ValueError("Extended observers cover original SGD/DPCO E/L/R, not policy updates")
         if getattr(method, "gradient_backend", "jvp") != "jvp":
             raise ValueError("Extended TPU observers require the JVP method backend; no dense replay")
         self.config, self.method = config, method
         self.reference_name, self.trajectory_method = reference_name, trajectory_method
-        self.trajectory_label = "sgd" if trajectory_method == "sgd" else ("sage_e" if reference_name == "error" else "sage_l")
+        self.trajectory_label = "sgd" if trajectory_method == "sgd" else {
+            "error": "dpco_e", "loss": "dpco_l", "correct": "dpco_r"}[reference_name]
+        # Existing E/L runs retain exactly their two-reference observer workload.
+        # Only an explicitly requested R trajectory adds correct-set candidates.
+        self.reference_names = ("loss", "error", "correct") if reference_name == "correct" else ("loss", "error")
         self.compute_dtype = compute_dtype
         self.ad = TrainingDiagnostics(task, method, DiagnosticConfig(transfer=False, update_check=config.update_check),
             reference_name=reference_name, trajectory_method=trajectory_method)
@@ -119,7 +123,7 @@ class TPUMechanisms:
             windows="only complete consecutive [start,end) windows telescope; R is observed nonlinear remainder, not an L bound")
         if getattr(self.method, "warmup_steps", 0):
             result["sgd_prefix_updates"] = self.method.warmup_steps
-            result["warmup_semantics"] = "actual_endpoint is SGD during prefix; T1/source/moments remain full-SAGE counterfactuals"
+            result["warmup_semantics"] = "actual_endpoint is SGD during prefix; T1/source/moments remain full-DPCO counterfactuals"
         return result
 
     def _executed_sgd(self, before):
@@ -152,8 +156,10 @@ class TPUMechanisms:
         gd = self._call("mean_gradient", self.ad._mean_gradient, params, batch, buffers,
             valid.astype(result.losses.dtype), count)
         both = {}
-        for name in ("loss", "error"):
+        for name in self.reference_names:
             selected = valid if name == "loss" else errors
+            if name == "correct":
+                selected = jax.lax.stop_gradient(valid & ~errors)
             n = jnp.sum(selected, dtype=jnp.float32)
             r = gd if name == "loss" else (self._call("mean_gradient", self.ad._mean_gradient,
                 params, batch, buffers, selected.astype(result.losses.dtype), n) if scalar(n) else
@@ -176,7 +182,7 @@ class TPUMechanisms:
         return scalar(self._call("dot", self._dot, a, b))
 
     def _correction(self, stats):
-        return self._call("difference", self._difference, stats.sage, stats.sgd)
+        return self._call("difference", self._difference, stats.dpco, stats.sgd)
 
     def _summary(self, stats):
         info = jax.device_get(self._call("summary", self.ad._summary, stats))
@@ -191,14 +197,14 @@ class TPUMechanisms:
 
     def _check(self, before, after, batch, stats, eta, key):
         if getattr(self.method, "warmup_steps", 0):
-            from src.methods.sage_policy import PolicyState
+            from src.methods.dpco_policy import PolicyState
             if (not isinstance(before.method_state, PolicyState) or not isinstance(after.method_state, PolicyState)
                     or int(before.method_state.updates) != int(before.step)
                     or int(after.method_state.updates) != int(after.step)):
                 raise ValueError("Warmup checkpoint phase does not match completed updates")
         replay = self._call("method_replay", self.ad._replay,
             before.params, batch, before.model_state, before.method_state, key)
-        expected = stats.sgd if self._executed_sgd(before) else stats.sage
+        expected = stats.sgd if self._executed_sgd(before) else stats.dpco
         difference = lambda a, b: self._call("difference", self._difference, a, b)
         norm = lambda a: scalar(self._call("norm", self._norm, a))
         pd = self._call("candidate", self.ad._candidate, before.params, expected, eta)
@@ -225,10 +231,14 @@ class TPUMechanisms:
 
     def _pair_rows(self, before, after, stats, reference, batch, eta_actual, bank_value, bank_h, check, base):
         c = self._correction(stats)
-        ns, nd = self._dot_value(stats.sage, stats.sage), self._dot_value(stats.sgd, stats.sgd)
+        ns, nd = self._dot_value(stats.dpco, stats.dpco), self._dot_value(stats.sgd, stats.sgd)
         objectives = [("source_full_batch_ce", stats.valid, self._dot_value(stats.sgd, c))]
         if reference == "error" and bool(jax.device_get(jnp.any(stats.errors))):
             objectives.append(("source_frozen_error_ce", stats.errors, self._dot_value(stats.reference, c)))
+        if reference == "correct":
+            correct = jax.lax.stop_gradient(stats.valid & ~stats.errors)
+            if bool(jax.device_get(jnp.any(correct))):
+                objectives.append(("source_frozen_correct_ce", correct, self._dot_value(stats.reference, c)))
         if self.target is not None:
             objectives.append(("fixed_training_bank_ce", None, self._dot_value(bank_h, c)))
         rates = [("absolute", None, float(v)) for v in self.config.absolute_lrs]
@@ -252,7 +262,7 @@ class TPUMechanisms:
                 gradient = stats.reference
             else:
                 gradient = stats.sgd
-            projected_sage = self._dot_value(gradient, stats.sage)
+            projected_dpco = self._dot_value(gradient, stats.dpco)
             projected_sgd = self._dot_value(gradient, stats.sgd)
             for kind, scale, eta in rates:
                 for normalization in (("original", "norm_matched") if self.config.norm_matched else ("original",)):
@@ -260,13 +270,13 @@ class TPUMechanisms:
                     eta_s = eta
                     if normalization == "norm_matched":
                         if ns == 0:
-                            defined, reason, eta_s = False, "zero_sage_norm", None
+                            defined, reason, eta_s = False, "zero_dpco_norm", None
                         else:
                             eta_s = eta*math.sqrt(nd/ns)
                             reason = "zero_lr" if eta == 0 else ("zero_sgd_norm" if nd == 0 else "")
                     row_base = dict(base, target_id=target_id, reference=reference, objective=objective,
                         buffer_semantics="fixed_bank_input_buffers" if is_bank else "source_before_buffers",
-                        lr_kind=kind, lr_scale=scale, probe_lr=eta, sage_probe_lr=eta_s,
+                        lr_kind=kind, lr_scale=scale, probe_lr=eta, dpco_probe_lr=eta_s,
                         normalization=normalization, defined=defined, undefined_reason=reason,
                         reference_valid=bool(scalar(stats.selected_count)>0),
                         objective_gain=original_gain, numeric_checked=check is not None,
@@ -278,14 +288,14 @@ class TPUMechanisms:
                     # Cache SCALAR losses only, not full parameter candidates.
                     # Common SGD endpoints and duplicate absolute/relative rates
                     # need not repeat whole-bank forwards across E/L/oracle rows.
-                    sage_label = "sgd" if stats.sage is stats.sgd else "sage_"+reference
+                    dpco_label = "sgd" if stats.dpco is stats.sgd else "dpco_"+reference
                     jd = cached("sgd", eta, stats.sgd)
-                    js = cached(sage_label, eta_s, stats.sage)
+                    js = cached(dpco_label, eta_s, stats.dpco)
                     h = js-jd
                     effective = (original_gain if normalization == "original" else
-                        eta_s/eta*projected_sage-projected_sgd) if eta else None
+                        eta_s/eta*projected_dpco-projected_sgd) if eta else None
                     resolution = self.ATOL*max(1., abs(initial), abs(jd), abs(js))
-                    data = dict(j_initial=initial, j_sgd=jd, j_sage=js, difference=h,
+                    data = dict(j_initial=initial, j_sgd=jd, j_dpco=js, difference=h,
                         effective_objective_gain=effective, difference_over_lr=h/eta if eta else None,
                         first_order_residual=h/eta+effective if eta else None,
                         loss_resolution=resolution, finite=bool(np.isfinite([initial, jd, js, original_gain]).all()))
@@ -294,8 +304,8 @@ class TPUMechanisms:
                     yield {**row_base, **data, "candidate_kind": "independent_pair", "actual_endpoint": "none",
                         "endpoint_loss_error": 0., "signal_reliable": reliable}
                     # Do not label a mismatched E/L or norm-matched direction as
-                    # the real executed SAGE. The real SGD endpoint is common.
-                    endpoint = ("sgd" if self._executed_sgd(before) else "sage"
+                    # the real executed DPCO. The real SGD endpoint is common.
+                    endpoint = ("sgd" if self._executed_sgd(before) else "dpco"
                         if reference == self.reference_name else None)
                     if normalization == "original" and eta == eta_actual and endpoint:
                         actual = cached("actual", eta)
@@ -303,7 +313,7 @@ class TPUMechanisms:
                         ad, a_s = (actual, js) if endpoint == "sgd" else (jd, actual)
                         ah = a_s-ad
                         yield {**row_base, **data, "candidate_kind": "actual_pair", "actual_endpoint": endpoint,
-                            "j_sgd": ad, "j_sage": a_s, "difference": ah,
+                            "j_sgd": ad, "j_dpco": a_s, "difference": ah,
                             "difference_over_lr": ah/eta if eta else None,
                             "first_order_residual": ah/eta+effective if eta else None,
                             "endpoint_loss_error": error,
@@ -311,7 +321,7 @@ class TPUMechanisms:
                             "signal_reliable": reliable and error < .1*min(abs(h), signal)}
 
     def _moments(self, before, bank_h, base):
-        accum = {name: dict(hs=0., hd=0., delta=0., target=0., mismatch=0., ns=0., nd=0.) for name in ("loss", "error")}
+        accum = {name: dict(hs=0., hd=0., delta=0., target=0., mismatch=0., ns=0., nd=0.) for name in self.reference_names}
         mean_gd = None
         k = len(self.target.batches)
         for item in self.target.batches:
@@ -321,10 +331,10 @@ class TPUMechanisms:
                 "mean_add", self._mean_add, mean_gd, gd, 1/k)
             for name, stats in sources.items():
                 c = self._correction(stats)
-                values = dict(hs=self._dot_value(bank_h, stats.sage), hd=self._dot_value(bank_h, stats.sgd),
+                values = dict(hs=self._dot_value(bank_h, stats.dpco), hd=self._dot_value(bank_h, stats.sgd),
                     delta=self._dot_value(stats.reference, c), target=self._dot_value(bank_h, c),
                     mismatch=self._dot_value(self._call("difference", self._difference, stats.reference, bank_h), c),
-                    ns=self._dot_value(stats.sage, stats.sage), nd=self._dot_value(stats.sgd, stats.sgd))
+                    ns=self._dot_value(stats.dpco, stats.dpco), nd=self._dot_value(stats.sgd, stats.sgd))
                 for key, value in values.items():
                     accum[name][key] += value/k
             del sources, gd, stats, c
@@ -332,9 +342,9 @@ class TPUMechanisms:
         hn = self._dot_value(bank_h, bank_h)
         for name, values in accum.items():
             yield dict(**base, reference=name, estimator="exact_finite_bank", bank_batch_count=k,
-                probability_sum=1., standard_error=None, mean_h_dot_sage=values["hs"], mean_h_dot_sgd=values["hd"],
+                probability_sum=1., standard_error=None, mean_h_dot_dpco=values["hs"], mean_h_dot_sgd=values["hd"],
                 mean_delta=values["delta"], mean_lambda=values["target"], mean_mismatch=values["mismatch"],
-                mean_norm_sage_sq=values["ns"], mean_norm_sgd_sq=values["nd"], mean_gd_h_l2_error=error,
+                mean_norm_dpco_sq=values["ns"], mean_norm_sgd_sq=values["nd"], mean_gd_h_l2_error=error,
                 mean_gd_h_relative_error=relative(error, math.sqrt(hn)), h_norm_sq=hn)
 
     def _windows(self, before, after, eta, fa_before, h, base):

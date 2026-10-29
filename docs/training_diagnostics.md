@@ -1,7 +1,7 @@
 # Real-update training diagnostics
 
 These optional observers investigate an early training-CE reversal without changing
-SGD, SAGE-E or SAGE-L. Every real update still uses the selected method, original
+SGD, DPCO-E or DPCO-L. Every real update still uses the selected method, original
 batch denominator, full-parameter scores and the existing compiled training step.
 No edit warm-up, intermittent SGD updates, new regularizer or score normalization
 is introduced. The LR-times-step pattern is a descriptive observation whose apparent
@@ -12,11 +12,11 @@ onset depends on smoothing; it is not an assumed universal critical threshold.
 On worker0, use the existing project environment and sequential nohup TPU suite:
 
 ```bash
-cd ~/Project_SAGE/SAGE
+cd ~/Project_DPCO/DPCO
 source ../.venv/bin/activate
-nohup ./run_sage_suite.sh \
+nohup ./run_dpco_suite.sh \
   --mode train --dataset imagenet100 --model resnet50 \
-  --methods sage_l --seeds 2 --steps 200 --batch-size 256 \
+  --methods dpco_l --seeds 2 --steps 200 --batch-size 256 \
   --lr 0.01 --lr-schedule constant --momentum 0 --no-nesterov --l2-coefficient 0 \
   --diagnostics --no-theorem-probes \
   --diagnostic-steps 0 5 10 20 25 30 50 75 100 \
@@ -27,7 +27,7 @@ nohup ./run_sage_suite.sh \
 ```
 
 Use `--dry-run` without outer nohup to inspect resolved settings and every child
-command before launching. Change `--methods` to `sage_l sage_e sgd` for sequential
+command before launching. Change `--methods` to `dpco_l dpco_e sgd` for sequential
 runs. A diagnostic compares both directions at the current trajectory's frozen
 state; it never switches the method that advances that trajectory. Normal initial,
 final and configured periodic validation remains separate from these checks.
@@ -48,7 +48,7 @@ Settings are also available in a `[diagnostics]` TOML table using the dataclass
 field names `enabled`, `steps`, `update_check`, `paired_loss`, `transfer`,
 `lr_scales`, `audit_batches`, and `audit_seed`. CLI values override TOML values.
 At least one check must be enabled under the master switch. Diagnostics require
-momentum and L2 to be zero and cover only SGD/full common-reference SAGE. A cosine
+momentum and L2 to be zero and cover only SGD/full common-reference DPCO. A cosine
 schedule is supported numerically, including a zero floor, but the first reversal
 audit should retain the original constant-LR protocol.
 
@@ -94,7 +94,7 @@ The method is also replayed read-only at the frozen before-state to localize a
 discrepancy. This replay is not mislabeled as a raw intermediate exported from the
 original training kernel. The decisive parameter check compares the original
 kernel's real after-parameters with theta_before - LR * independent_direction.
-The expected direction is SGD for an SGD trajectory and SAGE for a SAGE trajectory.
+The expected direction is SGD for an SGD trajectory and DPCO for a DPCO trajectory.
 
 `diagnostic_update.csv` contains:
 
@@ -116,7 +116,7 @@ The metadata records JAX's matmul precision setting and x64 switch for provenanc
 
 ## Check 2: same-state source-batch losses
 
-`diagnostic_paired.csv` records `full_batch_ce` and, for a nonempty SAGE-E error
+`diagnostic_paired.csv` records `full_batch_ce` and, for a nonempty DPCO-E error
 reference, `frozen_error_ce`. Initial and both candidate losses use the identical
 source images/augmentation and before-state BN semantics. The original error mask
 is held fixed even if candidate predictions change.
@@ -128,12 +128,12 @@ these cases. Consequently an implementation mismatch is not hidden by reconstruc
 both candidates. Until Check1 residuals are understood, the scale1 first-order
 residual can contain implementation error as well as finite-step/numerical error.
 
-- `difference` is H = candidate_SAGE_CE - candidate_SGD_CE.
+- `difference` is H = candidate_DPCO_CE - candidate_SGD_CE.
 - `reference_delta` always means r dot (Gs-Gd) for the independent directions.
 - `objective_gain` is grad(evaluated objective) dot (Gs-Gd). These quantities differ
-  for SAGE-E when evaluating full-batch CE; their names never silently swap meaning.
+  for DPCO-E when evaluating full-batch CE; their names never silently swap meaning.
 - `first_order_residual` is H/eta + objective_gain, not a certified smoothness bound.
-- `j_initial`, `j_sgd`, `j_sage`, `probe_lr`, scales, selected counts, norms and
+- `j_initial`, `j_sgd`, `j_dpco`, `probe_lr`, scales, selected counts, norms and
   finiteness allow independent recalculation. At eta0 the ratio/residual are blank.
 
 ## Check 3: transfer to a fixed training audit bank
@@ -184,22 +184,22 @@ sampled source batches at one frozen state would be a separate sampling experime
 
 ## Opt-in policy trajectories
 
-The continuous/alternating/half aliases use method=sage_policy. Original SGD/SAGE
+The continuous/alternating/half aliases use method=dpco_policy. Original SGD/DPCO
 diagnostic records and default computation paths retain their existing semantics.
 On policy trajectories, diagnostic_update compares the real update to the
 independently reconstructed `Gd + alpha*(Gs-Gd)` direction. The recorded
-reference_delta and norm_sage_sq still describe FULL SAGE, not alpha-scaled SAGE.
+reference_delta and norm_dpco_sq still describe FULL DPCO, not alpha-scaled DPCO.
 
 `policy_steps.csv` stores step, policy_mode, policy_alpha, executed_method and
 reference for each real update. Its step is the completed update number. The
 policy counter in TrainState.method_state must equal TrainState.step and is saved
 with the normal checkpoint; observation/replay and compile warmup never advance it.
-`--alternating-first sgd|sage` selects the initial phase (default sgd). The observer
+`--alternating-first sgd|dpco` selects the initial phase (default sgd). The observer
 uses the same configured offset at every state, not a new first step at each node.
 Metadata records alternating_first; resume configuration must keep it unchanged.
 Older metadata without this field means the original SGD-first convention.
 
-The existing diagnostic_paired/transfer streams always compare full SAGE to SGD.
+The existing diagnostic_paired/transfer streams always compare full DPCO to SGD.
 At scale1, the real endpoint is included only if alpha is exactly0 or1. For half,
 both endpoints of that full comparison are hypothetical and actual_update_in_pair
 is false. This avoids relabeling a half step as an original Theorem2 experiment.
@@ -216,5 +216,5 @@ paired/transfer switches and shared CSV buffering/recovery.
 
 SGD policy rounds have zero theoretical correction gain; numerical differences
 between the real fused SGD endpoint and independent reconstruction may remain.
-Do not treat such differences as a measured nonzero SAGE correction. Policy
+Do not treat such differences as a measured nonzero DPCO correction. Policy
 diagnostics are overhead and are disabled independently of the training policy.

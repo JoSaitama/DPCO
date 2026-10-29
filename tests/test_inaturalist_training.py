@@ -149,10 +149,10 @@ class INaturalistTrainingTests(unittest.TestCase):
         def dry_run(*flags):
             return json.loads(subprocess.check_output([str(ROOT / "run_inaturalist_suite.sh"),
                 "--dry-run", *flags], cwd=gettempdir(),
-                env={**os.environ, "SAGE_PYTHON": sys.executable}, text=True))
+                env={**os.environ, "DPCO_PYTHON": sys.executable}, text=True))
         defaults = dry_run()
         self.assertEqual([(p["method"], p["reference"]) for p in defaults],
-                         [("sage", "error"), ("sgd", "loss"), ("sage", "loss")])
+                         [("dpco", "error"), ("sgd", "loss"), ("dpco", "loss")])
         for plan in defaults:
             self.assertEqual((plan["seed"], plan["num_classes"], plan["total_steps"], plan["batch_size"]),
                              (5, 10000, 2000, 256))
@@ -160,7 +160,7 @@ class INaturalistTrainingTests(unittest.TestCase):
             self.assertEqual(plan["worker"], "worker0_only")
             self.assertTrue(plan["wait"])
             self.assertFalse(plan["probes_enabled"])
-        plans = dry_run("--mode", "smoke", "--methods", "sgd", "sage_l", "--seeds", "2", "7",
+        plans = dry_run("--mode", "smoke", "--methods", "sgd", "dpco_l", "--seeds", "2", "7",
             "--data-dir", "/tmp/local subset", "--steps", "5", "--batch-size", "16",
             "--model", "resnet101", "--datamode", "clean", "--lr", ".005", "--momentum", ".9",
             "--nesterov", "--l2-coefficient", ".0001", "--lr-schedule", "cosine", "--min-lr", ".000005",
@@ -184,7 +184,7 @@ class INaturalistTrainingTests(unittest.TestCase):
             self.assertEqual(resolved.training.min_learning_rate, .000005)
             self.assertEqual(resolved.checkpoints.latest_every_steps, 2)
             self.assertEqual(resolved.evaluation, EvaluationConfig("steps", 3))
-        single = dry_run("--mode", "validate", "--methods", "sage_e", "--eval-every-epochs", ".5")
+        single = dry_run("--mode", "validate", "--methods", "dpco_e", "--eval-every-epochs", ".5")
         self.assertTrue(single["probes_enabled"])
         self.assertEqual(single["evaluation_interval"], .5)
 
@@ -208,7 +208,7 @@ class INaturalistTrainingTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             digest = prepared_fixture(root / "subset", classes=10000)
-            for label in ("sage_e", "sgd", "sage_l"):
+            for label in ("dpco_e", "sgd", "dpco_l"):
                 config = resolve_config(CONFIG, mode="smoke", method=label,
                     data_dir=str(root / "subset"), steps=2, batch_size=2)
                 config = replace(config, data=replace(config.data, image_size=8),

@@ -7,9 +7,10 @@ from pathlib import Path
 from src.config import DATASET_CLASSES, INATURALIST_PREPARED_DIR, MethodConfig, ReferenceConfig, load_config
 
 
-EXPERIMENT_METHODS = {"sgd": ("sgd", "loss"), "sage_e": ("sage", "error"),
-                      "sage_l": ("sage", "loss")}
-POLICY_METHODS = {f"sage_{reference}_{mode}": (signal, mode)
+EXPERIMENT_METHODS = {"adam": ("adam", "loss"), "dpco": ("dpco", "ema"),
+                      "dpco_filter": ("dpco", "ema"), "dpco_flip": ("dpco", "ema"), "sgd": ("sgd", "loss"), "dpco_e": ("dpco", "error"),
+                      "dpco_l": ("dpco", "loss"), "dpco_r": ("dpco", "correct")}
+POLICY_METHODS = {f"dpco_{reference}_{mode}": (signal, mode)
                   for reference, signal in (("l", "loss"), ("e", "error"))
                   for mode in ("continuous", "alternating", "half")}
 
@@ -26,11 +27,18 @@ def add_overrides(parser, *, multiple=False):
     else:
         parser.add_argument("--seed", type=int)
         parser.add_argument("--method", choices=(*EXPERIMENT_METHODS, *POLICY_METHODS))
+    parser.add_argument("--optimizer", choices=("sgd", "adam"))
+    parser.add_argument("--reference-beta", type=float, help="Raw batch-gradient EMA decay; default 0.9")
+    parser.add_argument("--negative-weight", type=float,
+                        help="DPCO contribution for alignment < 0: 0 filter, -1 flip; any finite scalar")
+    parser.add_argument("--adam-beta1", type=float)
+    parser.add_argument("--adam-beta2", type=float)
+    parser.add_argument("--adam-epsilon", type=float)
     parser.add_argument("--dataset", choices=tuple(DATASET_CLASSES))
-    parser.add_argument("--alternating-first", choices=("sgd", "sage"),
-                        help="First update of alternating SAGE policies; default sgd. Other methods in a suite are unchanged.")
-    parser.add_argument("--sage-warmup-percent", type=float,
-                        help="Initial percentage of updates using SGD before original/continuous SAGE; 0 (default) disables it. Other suite methods are unchanged.")
+    parser.add_argument("--alternating-first", choices=("sgd", "dpco"),
+                        help="First update of alternating DPCO policies; default sgd. Other methods in a suite are unchanged.")
+    parser.add_argument("--dpco-warmup-percent", type=float,
+                        help="Initial percentage of updates using SGD before original/continuous DPCO; 0 (default) disables it. Other suite methods are unchanged.")
     parser.add_argument("--data-dir", help="Prepared data location, relative to the repository or absolute; iNaturalist uses the subset directory itself")
     parser.add_argument("--model", choices=("resnet50", "resnet101"))
     parser.add_argument("--data-mode", "--datamode", dest="data_mode",
@@ -67,6 +75,18 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--diagnostic-audit-seed", type=int)
 
 
+DPCO_OPTIONS = ("optimizer", "reference_beta", "negative_weight", "adam_beta1", "adam_beta2", "adam_epsilon")
+
+
+def dpco_overrides(args):
+    return {name: getattr(args, name, None) for name in DPCO_OPTIONS}
+
+
+def dpco_cli_args(args):
+    return [part for name, value in dpco_overrides(args).items() if value is not None
+            for part in ("--" + name.replace("_", "-"), str(value))]
+
+
 DIAGNOSTIC_OPTIONS = ("theorem_probes", "diagnostics", "diagnostic_steps", "diagnostic_update_check",
                       "diagnostic_paired_loss", "diagnostic_transfer", "diagnostic_lr_scales",
                       "diagnostic_audit_batches", "diagnostic_audit_seed")
@@ -94,9 +114,11 @@ def diagnostic_cli_args(args):
 
 def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    method=None, dataset=None, model=None, data_mode=None, data_dir=None, l2_coefficient=None,
-                   alternating_first=None, sage_warmup_percent=None,
+                   alternating_first=None, dpco_warmup_percent=None,
                    momentum=None, nesterov=None, learning_rate=None, lr_schedule=None,
-                   min_learning_rate=None, checkpoint_every_steps=None, checkpoints=None,
+                   min_learning_rate=None, optimizer=None, reference_beta=None, negative_weight=None,
+                   adam_beta1=None, adam_beta2=None, adam_epsilon=None,
+                   checkpoint_every_steps=None, checkpoints=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
                    diagnostics=None, diagnostic_steps=None, diagnostic_update_check=None,
                    diagnostic_paired_loss=None, diagnostic_transfer=None, diagnostic_lr_scales=None,
@@ -111,28 +133,47 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     if method is not None:
         if method in POLICY_METHODS:
             reference, policy_mode = POLICY_METHODS[method]
-            selected_method = MethodConfig("sage_policy", policy_mode=policy_mode)
+            selected_method = MethodConfig("dpco_policy", policy_mode=policy_mode)
         else:
             name, reference = EXPERIMENT_METHODS[method]
-            selected_method = MethodConfig(name)
-        config = replace(config, method=selected_method, reference=ReferenceConfig(reference))
+            weight = {"dpco_filter": 0., "dpco_flip": -1.}.get(method,
+                config.method.negative_weight if config.reference.name == "ema" else -1.)
+            selected_method = MethodConfig(name, negative_weight=weight if reference == "ema" else -1.)
+        config = replace(config, method=selected_method,
+                         reference=replace(config.reference, name=reference))
+        if method in ("adam", "dpco", "dpco_filter", "dpco_flip"):
+            config = replace(config, training=replace(config.training, optimizer="adam", momentum=0., nesterov=False))
+        elif method == "sgd":
+            config = replace(config, training=replace(config.training, optimizer="sgd"))
+    if reference_beta is not None:
+        config = replace(config, reference=replace(config.reference, beta=reference_beta))
+    if negative_weight is not None:
+        import math
+        if isinstance(negative_weight, bool) or not math.isfinite(negative_weight):
+            raise ValueError("negative_weight must be a finite number")
+    if negative_weight is not None and config.reference.name == "ema":
+        if method in ("dpco_filter", "dpco_flip") and negative_weight != config.method.negative_weight:
+            raise ValueError("Alias conflicts with negative_weight; use --method dpco for custom weights")
+        config = replace(config, method=replace(config.method, negative_weight=negative_weight))
+    elif negative_weight is not None and config.method.name != "adam":
+        raise ValueError("negative_weight requires dpco with EMA reference")
     if alternating_first is not None:
-        if alternating_first not in ("sgd", "sage"):
-            raise ValueError("alternating_first must be sgd or sage")
+        if alternating_first not in ("sgd", "dpco"):
+            raise ValueError("alternating_first must be sgd or dpco")
         # A common suite option applies only to its alternating jobs. Preserve
         # baseline/continuous/half configs and their identities exactly.
-        if config.method.name == "sage_policy" and config.method.policy_mode == "alternating":
+        if config.method.name == "dpco_policy" and config.method.policy_mode == "alternating":
             config = replace(config, method=replace(config.method, alternating_first=alternating_first))
-    if sage_warmup_percent is not None:
+    if dpco_warmup_percent is not None:
         import math
-        if (isinstance(sage_warmup_percent, bool) or not math.isfinite(sage_warmup_percent)
-                or not 0 <= sage_warmup_percent <= 100):
-            raise ValueError("sage_warmup_percent must be finite and in [0, 100]")
+        if (isinstance(dpco_warmup_percent, bool) or not math.isfinite(dpco_warmup_percent)
+                or not 0 <= dpco_warmup_percent <= 100):
+            raise ValueError("dpco_warmup_percent must be finite and in [0, 100]")
         # A mixed suite can share the option without changing SGD, alternating
         # or half policies. Direct TOML configurations reject invalid combinations.
-        if config.method.name == "sage" or (config.method.name == "sage_policy"
+        if config.method.name == "dpco" or (config.method.name == "dpco_policy"
                 and config.method.policy_mode == "continuous"):
-            config = replace(config, method=replace(config.method, sage_warmup_percent=sage_warmup_percent))
+            config = replace(config, method=replace(config.method, dpco_warmup_percent=dpco_warmup_percent))
     if dataset is not None:
         directory = config.data.prepared_dir
         if (dataset == "inaturalist2021") != (config.data.name == "inaturalist2021"):
@@ -154,7 +195,9 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     training_overrides = {name: value for name, value in (
         ("l2_coefficient", l2_coefficient), ("momentum", momentum), ("nesterov", nesterov),
         ("learning_rate", learning_rate), ("lr_schedule", lr_schedule),
-        ("min_learning_rate", min_learning_rate)) if value is not None}
+        ("min_learning_rate", min_learning_rate), ("optimizer", optimizer),
+        ("adam_beta1", adam_beta1), ("adam_beta2", adam_beta2),
+        ("adam_epsilon", adam_epsilon)) if value is not None}
     config = replace(config, training=replace(config.training, **training_overrides))
     if checkpoint_every_steps is not None:
         config = replace(config, checkpoints=replace(config.checkpoints,

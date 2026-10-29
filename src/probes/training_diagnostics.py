@@ -24,14 +24,14 @@ class IndependentDirections(NamedTuple):
     scores: object
     weights: object
     sgd: object
-    sage: object
+    dpco: object
     model_state: object
 
 
 def independent_directions(task, reference_name, params, batch, model_state):
     """Differentiate scalar losses rather than reuse the method's VJP helper.
 
-    Error selection, reference and signs are frozen at the input state. Every
+    Prediction selection, reference and signs are frozen at the input state. Every
     evaluation uses the entire logical batch, including BatchNorm coupling.
     Small offline tests additionally compare these results to a dense oracle;
     the scalar-loss route alone is not a proof of every AD backend's accuracy.
@@ -40,6 +40,10 @@ def independent_directions(task, reference_name, params, batch, model_state):
     valid = result.valid_mask
     errors = jax.lax.stop_gradient(valid & result.feedback["error_mask"])
     selected = valid if reference_name == "loss" else errors
+    if reference_name == "correct":
+        selected = jax.lax.stop_gradient(valid & ~errors)
+    elif reference_name not in ("loss", "error"):
+        raise ValueError("Unknown diagnostic reference")
     count = jnp.sum(valid)
     selected_count = jnp.sum(selected)
 
@@ -89,12 +93,12 @@ def _candidate(params, direction, eta):
 
 
 class TrainingDiagnostics:
-    """Observe one trajectory while pairing SGD/SAGE at each frozen state."""
+    """Observe one trajectory while pairing SGD/DPCO at each frozen state."""
 
     def __init__(self, task, method, config, *, reference_name, trajectory_method,
                  audit_batches=(), objective_mode="train_batch_bn; frozen_before_buffers"):
-        if reference_name not in ("loss", "error") or trajectory_method not in ("sgd", "sage", "sage_policy"):
-            raise ValueError("Diagnostics require a loss/error reference and an SGD/SAGE trajectory")
+        if reference_name not in ("loss", "error", "correct") or trajectory_method not in ("sgd", "dpco", "dpco_policy"):
+            raise ValueError("Diagnostics require a loss/error/correct reference and an SGD/DPCO trajectory")
         if config.transfer and len(audit_batches) != config.audit_batches:
             raise ValueError("Transfer diagnostics require the configured fixed training audit bank")
         self.task, self.config = task, config
@@ -139,6 +143,8 @@ class TrainingDiagnostics:
         valid = result.valid_mask
         errors = jax.lax.stop_gradient(valid & result.feedback["error_mask"])
         selected = valid if self.reference_name == "loss" else errors
+        if self.reference_name == "correct":
+            selected = jax.lax.stop_gradient(valid & ~errors)
         count = jnp.sum(valid, dtype=jnp.float32)
         selected_count = jnp.sum(selected, dtype=jnp.float32)
         reference = self._mean_gradient(params, batch, model_state,
@@ -170,10 +176,10 @@ class TrainingDiagnostics:
                 "overlap_policy": "fixed bank, overlap counted, no target reselection or training exclusion",
                 "scope": "finite training-audit targets; not a population or convergence certificate",
                 "sample_energy": "not measured; no per-example energy loop"}
-        if self.trajectory_method == "sage_policy" or self.warmup_steps:
+        if self.trajectory_method == "dpco_policy" or self.warmup_steps:
             metadata.update(policy_mode=self.method.mode,
                 alternating_first=self.method.alternating_first,
-                policy_comparison="diagnostic_policy compares the active policy to SGD; legacy paired/transfer compare FULL SAGE to SGD",
+                policy_comparison="diagnostic_policy compares the active policy to SGD; legacy paired/transfer compare FULL DPCO to SGD",
                 candidate_policy="full pair uses actual endpoint only for alpha=0 or 1; policy pair uses actual endpoint at scale 1")
             if self.warmup_steps:
                 metadata["sgd_prefix_updates"] = self.warmup_steps
@@ -181,7 +187,7 @@ class TrainingDiagnostics:
 
     @staticmethod
     def _summarize(stats):
-        correction = _difference(stats.sage, stats.sgd)
+        correction = _difference(stats.dpco, stats.sgd)
         delta = tree_dot(stats.reference, correction)
         formula = jnp.sum(jnp.where(stats.valid, (stats.weights - 1.) * stats.scores, 0.)) / jnp.sum(stats.valid)
         return {"valid_batch_size": jnp.sum(stats.valid), "error_count": jnp.sum(stats.errors),
@@ -190,7 +196,7 @@ class TrainingDiagnostics:
                 "reference_delta": delta, "identity_residual": delta - formula,
                 "score_min_abs": jnp.min(jnp.where(stats.valid, jnp.abs(stats.scores), jnp.inf)),
                 "norm_sgd_sq": tree_dot(stats.sgd, stats.sgd),
-                "norm_sage_sq": tree_dot(stats.sage, stats.sage)}
+                "norm_dpco_sq": tree_dot(stats.dpco, stats.dpco)}
 
     @staticmethod
     def _check_update(before, after, replay, expected_direction, expected_state, eta):
@@ -214,8 +220,8 @@ class TrainingDiagnostics:
         if update_step != step + 1:
             raise ValueError("Diagnostics require exactly one actual completed update")
         alpha = None
-        if self.trajectory_method == "sage_policy" or self.warmup_steps:
-            from src.methods.sage_policy import PolicyState, policy_alpha
+        if self.trajectory_method == "dpco_policy" or self.warmup_steps:
+            from src.methods.dpco_policy import PolicyState, policy_alpha
             if (not isinstance(before.method_state, PolicyState)
                     or not isinstance(after.method_state, PolicyState)
                     or int(before.method_state.updates) != step
@@ -231,13 +237,13 @@ class TrainingDiagnostics:
                  "source_context_json": json.dumps(context, sort_keys=True)})]
         stats = self._independent(before.params, batch, before.model_state)
         summary = self._summary(stats)
-        correction = self._correction(stats.sage, stats.sgd)
+        correction = self._correction(stats.dpco, stats.sgd)
         common = {**base, "objective_mode": self.objective_mode, "learning_rate": learning_rate,
                   "reference_delta": summary["reference_delta"],
-                  "norm_sgd_sq": summary["norm_sgd_sq"], "norm_sage_sq": summary["norm_sage_sq"]}
+                  "norm_sgd_sq": summary["norm_sgd_sq"], "norm_dpco_sq": summary["norm_dpco_sq"]}
         if self.config.update_check:
             replay = self._replay(before.params, batch, before.model_state, before.method_state, rng_key)
-            expected = stats.sage if self.trajectory_method == "sage" else stats.sgd
+            expected = stats.dpco if self.trajectory_method == "dpco" else stats.sgd
             if alpha is not None:
                 expected = self._policy_direction(stats, alpha)
             errors = self._update_errors(before, after, replay, expected, stats.model_state, learning_rate)
@@ -247,6 +253,10 @@ class TrainingDiagnostics:
             objectives = [("full_batch_ce", stats.valid, self._projection(stats.sgd, correction))]
             if self.reference_name == "error" and bool(jax.device_get(jnp.any(stats.errors))):
                 objectives.insert(0, ("frozen_error_ce", stats.errors, summary["reference_delta"]))
+            if self.reference_name == "correct":
+                correct = jax.lax.stop_gradient(stats.valid & ~stats.errors)
+                if bool(jax.device_get(jnp.any(correct))):
+                    objectives.insert(0, ("frozen_correct_ce", correct, summary["reference_delta"]))
             for name, mask, gain in objectives:
                 initial = jnp.sum(jnp.where(mask, stats.losses, 0.)) / jnp.sum(mask)
                 for scale in self.config.lr_scales:
@@ -290,11 +300,11 @@ class TrainingDiagnostics:
         if alpha == 0.:
             return stats.sgd
         if alpha == 1.:
-            return stats.sage
-        return jax.tree_util.tree_map(lambda d, s: .5 * (d + s), stats.sgd, stats.sage)
+            return stats.dpco
+        return jax.tree_util.tree_map(lambda d, s: .5 * (d + s), stats.sgd, stats.dpco)
 
     def _policy_row(self, before, after, batch, mask, stats, scale, learning_rate, initial, gain, alpha):
-        """Actual-policy evidence is separate from the full-SAGE counterfactual."""
+        """Actual-policy evidence is separate from the full-DPCO counterfactual."""
         eta = learning_rate * scale
         pd = self._candidate(before.params, stats.sgd, eta)
         pp = (after.params if scale == 1. else self._candidate(
@@ -312,13 +322,13 @@ class TrainingDiagnostics:
                     *, actual_alpha=None):
         eta = learning_rate * scale
         pd = self._candidate(before.params, stats.sgd, eta)
-        ps = self._candidate(before.params, stats.sage, eta)
+        ps = self._candidate(before.params, stats.dpco, eta)
         # The base-rate comparison includes the ORIGINAL compiled step's result.
         # If implementation differs from independent AD, H and its residual expose
         # that mismatch instead of silently testing two reconstructed updates.
         actual = scale == 1. and (actual_alpha is None or actual_alpha in (0., 1.))
         if actual:
-            if actual_alpha == 1. or (actual_alpha is None and self.trajectory_method == "sage"):
+            if actual_alpha == 1. or (actual_alpha is None and self.trajectory_method == "dpco"):
                 ps = after.params
             else:
                 pd = after.params
@@ -327,7 +337,7 @@ class TrainingDiagnostics:
         difference = js - jd
         ratio = difference / eta if eta > 0 else None
         return {"lr_scale": scale, "probe_lr": eta, "j_initial": initial,
-                "j_sgd": jd, "j_sage": js, "difference": difference,
+                "j_sgd": jd, "j_dpco": js, "difference": difference,
                 "difference_over_lr": ratio, "objective_gain": gain,
                 "first_order_residual": ratio + gain if eta > 0 else None,
                 "actual_update_in_pair": actual,

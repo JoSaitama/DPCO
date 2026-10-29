@@ -31,18 +31,21 @@ class RunStatus:
         self.identity = dict(
             run_name=paths.name, attempt_id=attempt_id or uuid4().hex,
             dataset=config.data.name, data_mode=config.data.mode,
-            model=config.model.name, method=(f"sage_policy_{config.method.policy_mode}"
-                if config.method.name == "sage_policy" else config.method.name),
+            model=config.model.name, method=(f"dpco_policy_{config.method.policy_mode}"
+                if config.method.name == "dpco_policy" else config.method.name),
             reference=config.reference.name if config.method.name in
-                ("sage", "sage_loo", "dtv", "dtv_loo", "sage_policy") else "",
+                ("dpco", "dpco_loo", "dtv", "dtv_loo", "dpco_policy") else "",
             seed=config.seed, initial_lr=config.training.learning_rate,
             mode=mode, resume=resume, total_steps=config.training.total_steps,
         )
-        if (config.method.name == "sage_policy" and config.method.policy_mode == "alternating"
-                and config.method.alternating_first == "sage"):
-            self.identity["method"] += "_first_sage"
-        if config.method.sage_warmup_percent:
-            self.identity["method"] += "_warmup" + format(config.method.sage_warmup_percent, ".12g") + "pct"
+        if (config.method.name == "dpco_policy" and config.method.policy_mode == "alternating"
+                and config.method.alternating_first == "dpco"):
+            self.identity["method"] += "_first_dpco"
+        if config.method.dpco_warmup_percent:
+            self.identity["method"] += "_warmup" + format(config.method.dpco_warmup_percent, ".12g") + "pct"
+        if config.reference.name == "ema" or config.training.optimizer == "adam":
+            from src.training.results import method_label
+            self.identity["method"] = method_label(config)
         self.terminal = None
         self._depth = 0
         self._pending_success = False

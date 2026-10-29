@@ -19,9 +19,9 @@ sys.path.insert(0, str(ROOT))
 
 from src.config import load_config
 from src.training.launch import (absolute_path, add_overrides, diagnostic_cli_args,
-                                 diagnostic_overrides, resolve_config)
+                                 diagnostic_overrides, dpco_overrides, dpco_cli_args, resolve_config)
 from src.training.results import ResultsPaths, make_run_name
-from src.training.schedules import sage_warmup_steps
+from src.training.schedules import dpco_warmup_steps
 from src.training.runtime import configure_worker0
 from src.training.status import RunStatus
 from src.probes.mechanism_config import overrides as mechanism_overrides, cli_args as mechanism_cli_args
@@ -37,7 +37,7 @@ def plan_job(args, path, config, method):
     for flag, value in (("--steps", args.steps), ("--batch-size", args.batch_size),
                         ("--method", method), ("--dataset", args.dataset),
                         ("--alternating-first", args.alternating_first),
-                        ("--sage-warmup-percent", args.sage_warmup_percent),
+                        ("--dpco-warmup-percent", args.dpco_warmup_percent),
                         ("--model", args.model), ("--data-mode", args.data_mode),
                         ("--data-dir", args.data_dir),
                         ("--l2-coefficient", args.l2_coefficient), ("--momentum", args.momentum),
@@ -52,6 +52,7 @@ def plan_job(args, path, config, method):
         command.append("--nesterov" if args.nesterov else "--no-nesterov")
     if args.checkpoints is not None:
         command.append("--checkpoints" if args.checkpoints else "--no-checkpoints")
+    command.extend(dpco_cli_args(args))
     command.extend(diagnostic_cli_args(args))
     command.extend(mechanism_cli_args(args))
     if args.resume:
@@ -63,7 +64,7 @@ def launch_job(args, config, paths, command, *, wait):
     if shutil.which("nohup") is None:
         raise RuntimeError("nohup is required")
     env = os.environ.copy()
-    env["SAGE_BACKGROUND_LAUNCH"] = "1"
+    env["DPCO_BACKGROUND_LAUNCH"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     settings = configure_worker0(config.execution, environ=env)
     if args.resume:
@@ -134,14 +135,14 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             config = resolve_config(path, mode=args.mode, steps=args.steps, batch_size=args.batch_size,
                 seed=seed, method=method, dataset=args.dataset, model=args.model, data_mode=args.data_mode,
                 alternating_first=args.alternating_first,
-                sage_warmup_percent=args.sage_warmup_percent,
+                dpco_warmup_percent=args.dpco_warmup_percent,
                 data_dir=args.data_dir,
                 l2_coefficient=args.l2_coefficient, momentum=args.momentum, nesterov=args.nesterov,
                 learning_rate=args.learning_rate, lr_schedule=args.lr_schedule,
                 min_learning_rate=args.min_learning_rate, checkpoint_every_steps=args.checkpoint_every_steps,
                 checkpoints=args.checkpoints,
                 eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
-                **diagnostic_overrides(args), **mechanism_overrides(args))
+                **diagnostic_overrides(args), **dpco_overrides(args), **mechanism_overrides(args))
             jobs.append((config, method))
     if args.resume and not jobs[0][0].checkpoints.enabled:
         parser.error("Resume requires checkpoints enabled; --no-checkpoints runs cannot be resumed")
@@ -151,10 +152,13 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
         plans = [{"command": command, "stdout": str(paths.logs / "stdout.log"),
             "mode": args.mode, "backend": "tpu_only", "worker": "worker0_only", "wait": wait,
             "seed": config.seed, "method": config.method.name, "reference": config.reference.name,
-            "policy_mode": config.method.policy_mode if config.method.name == "sage_policy" else None,
-            "sage_warmup_percent": config.method.sage_warmup_percent,
-            "sage_warmup_steps": sage_warmup_steps(config),
-            "alternating_first": config.method.alternating_first if config.method.name == "sage_policy"
+            "policy_mode": config.method.policy_mode if config.method.name == "dpco_policy" else None,
+            "optimizer": config.training.optimizer,
+            "reference_beta": config.reference.beta if config.reference.name == "ema" else None,
+            "negative_weight": config.method.negative_weight if config.reference.name == "ema" else None,
+            "dpco_warmup_percent": config.method.dpco_warmup_percent,
+            "dpco_warmup_steps": dpco_warmup_steps(config),
+            "alternating_first": config.method.alternating_first if config.method.name == "dpco_policy"
                 and config.method.policy_mode == "alternating" else None,
             "dataset": config.data.name, "num_classes": config.data.num_classes,
             "model": config.model.name, "data_mode": config.data.mode,

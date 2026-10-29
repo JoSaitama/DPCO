@@ -15,19 +15,24 @@ import sys
 SCHEMAS = {
     "train_steps": ("step", "samples_seen", "epoch_progress", "learning_rate", "valid_batch_size", "train_ce", "train_top1", "elapsed_wall_s"),
     "evaluation": ("step", "samples_seen", "epoch_progress", "eval_sample_count", "val_ce", "val_top1", "val_top5", "elapsed_wall_s", "eval_duration_s"),
-    "theorem1": ("step", "phase", "probe_id", "valid_batch_size", "error_count", "negative_count", "flip_count", "reference_valid", "delta", "eta_delta", "reference_projection_sgd", "reference_projection_sage", "delta_formula", "identity_residual", "norm_sgd_sq", "norm_sage_sq"),
-    "theorem2": ("step", "phase", "probe_id", "objective", "objective_mode", "batch_id", "reference_name", "selected_count", "learning_rate", "lr_scale", "probe_lr", "j_initial", "j_sgd", "j_sage", "difference", "difference_over_lr", "delta", "first_order_residual", "norm_sgd_sq", "norm_sage_sq", "finite", "strict_gain_eligible"),
-    "theorem3": ("step", "phase", "probe_id", "objective", "objective_mode", "audit_loss", "audit_gradient_norm_sq", "delta", "target_gain", "transfer_difference", "sample_energy", "norm_sgd_sq", "norm_sage_sq", "cumulative_reference_gain", "cumulative_eta", "cumulative_eta_sq"),
+    "theorem1": ("step", "phase", "probe_id", "valid_batch_size", "error_count", "negative_count", "flip_count", "reference_valid", "delta", "eta_delta", "reference_projection_sgd", "reference_projection_dpco", "delta_formula", "identity_residual", "norm_sgd_sq", "norm_dpco_sq"),
+    "theorem2": ("step", "phase", "probe_id", "objective", "objective_mode", "batch_id", "reference_name", "selected_count", "learning_rate", "lr_scale", "probe_lr", "j_initial", "j_sgd", "j_dpco", "difference", "difference_over_lr", "delta", "first_order_residual", "norm_sgd_sq", "norm_dpco_sq", "finite", "strict_gain_eligible"),
+    "theorem3": ("step", "phase", "probe_id", "objective", "objective_mode", "audit_loss", "audit_gradient_norm_sq", "delta", "target_gain", "transfer_difference", "sample_energy", "norm_sgd_sq", "norm_dpco_sq", "cumulative_reference_gain", "cumulative_eta", "cumulative_eta_sq"),
     "timing": ("step", "event", "duration_s", "window_steps", "window_samples", "steps_per_s", "samples_per_s", "elapsed_wall_s", "checkpoint_bytes", "device", "peak_device_memory_bytes"),
     "summary": ("status", "step", "samples_seen", "elapsed_wall_s", "final_val_ce", "final_val_top1", "final_val_top5", "best_val_top1", "best_step", "error"),
 }
+
+# Only EMA runs add this stream, preserving legacy checkpoint cursor meanings.
+DPCO_SCHEMA = ("step", "valid_batch_size", "dpco_negative_count", "dpco_edited_count",
+    "dpco_negative_weight", "dpco_reference_updates", "dpco_reference_norm", "dpco_raw_norm",
+    "dpco_direction_norm", "dpco_reference_cosine", "dpco_reference_gain")
 
 # Real-update diagnostics deliberately have their own streams. Legacy theorem
 # CSV meanings and headers stay unchanged, including their historical step axis.
 DIAGNOSTIC_BASE = ("step", "update_step", "source_batch_id", "trajectory_method", "reference")
 DIAGNOSTIC_PAIR = (*DIAGNOSTIC_BASE, "objective_mode", "learning_rate", "reference_delta",
-    "norm_sgd_sq", "norm_sage_sq", "selected_count", "lr_scale", "probe_lr", "j_initial",
-    "j_sgd", "j_sage", "difference", "difference_over_lr", "objective_gain",
+    "norm_sgd_sq", "norm_dpco_sq", "selected_count", "lr_scale", "probe_lr", "j_initial",
+    "j_sgd", "j_dpco", "difference", "difference_over_lr", "objective_gain",
     "first_order_residual", "actual_update_in_pair", "finite")
 SCHEMAS.update({
     "policy_steps": ("step", "policy_mode", "policy_alpha", "executed_method", "reference"),
@@ -39,7 +44,7 @@ SCHEMAS.update({
         "objective_mode", "source_context_json"),
     "diagnostic_update": (*DIAGNOSTIC_BASE, "learning_rate", "valid_batch_size", "error_count",
         "flip_count", "reference_valid", "reference_delta", "identity_residual", "score_min_abs",
-        "norm_sgd_sq", "norm_sage_sq", "direction_l2_error", "direction_relative_error",
+        "norm_sgd_sq", "norm_dpco_sq", "direction_l2_error", "direction_relative_error",
         "parameter_l2_error", "parameter_relative_error", "replayed_parameter_l2_error",
         "model_state_max_abs_error", "replayed_model_state_max_abs_error", "finite"),
     "diagnostic_paired": (*DIAGNOSTIC_PAIR, "objective"),

@@ -32,7 +32,7 @@ class CheckpointControlTests(unittest.TestCase):
                         steps=(0, 1, 3), lr_scales=(1.,)))
                 trainer, source, evaluation, initial, probes = fixture_components(config)
                 observer = TrainingDiagnostics(trainer.task, trainer.method, config.diagnostics,
-                    reference_name="error", trajectory_method="sage")
+                    reference_name="error", trajectory_method="dpco")
                 runner = ExperimentRunner(config, trainer, source, evaluation, base_dir=ROOT,
                     train_sample_count=5, metadata={}, probes=probes, diagnostics=observer,
                     console=False, run_name="checkpoint_control")
@@ -88,12 +88,12 @@ class CheckpointControlTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be a boolean"):
             replace(fixture_config("unused"), checkpoints=replace(
                 fixture_config("unused").checkpoints, enabled=0)).validate()
-        env = {**os.environ, "SAGE_PYTHON": sys.executable}
-        for suite in ("run_sage_suite.sh", "run_inaturalist_suite.sh"):
+        env = {**os.environ, "DPCO_PYTHON": sys.executable}
+        for suite in ("run_dpco_suite.sh", "run_inaturalist_suite.sh"):
             for flag, enabled in (("--no-checkpoints", False), ("--checkpoints", True)):
                 with self.subTest(suite=suite, flag=flag):
                     output = subprocess.check_output(["bash", str(ROOT / suite), "--config", str(path),
-                        "--methods", "sgd", "sage_e_half", "--steps", "5", flag,
+                        "--methods", "sgd", "dpco_e_half", "--steps", "5", flag,
                         "--no-theorem-probes", "--dry-run"], cwd=ROOT, env=env, text=True)
                     for plan in json.loads(output):
                         self.assertEqual(plan["checkpoints_enabled"], enabled)

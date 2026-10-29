@@ -18,7 +18,7 @@ initialization = "random"
 precision = "float32"
 
 [method]
-name = "sage"
+name = "dpco"
 
 [reference]
 name = "error"

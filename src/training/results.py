@@ -41,18 +41,29 @@ class ResultsPaths:
         return ExperimentPaths(self, run_name)
 
 
+def method_label(config):
+    """Label optimizer and EMA weights without changing historical SGD labels."""
+    label = config.method.name
+    if label == "dpco_policy":
+        label = "dpco_" + ("e" if config.reference.name == "error" else "l") + "_" + config.method.policy_mode
+        if config.method.policy_mode == "alternating" and config.method.alternating_first == "dpco":
+            label += "_first_dpco"
+    if config.reference.name == "ema":
+        label = "dpco_ema_b" + format(config.reference.beta, ".12g") + "_w" + format(config.method.negative_weight, ".12g").replace("+", "")
+    elif label in ("dpco", "dpco_loo", "dtv", "dtv_loo"):
+        suffix = {"error": "_e", "loss": "_l", "correct": "_r"}[config.reference.name]
+        label = label.replace("_loo", "") + suffix + ("_loo" if label.endswith("_loo") else "")
+    if config.method.dpco_warmup_percent:
+        label += "_warmup" + format(config.method.dpco_warmup_percent, ".12g") + "pct"
+    if config.training.optimizer == "adam" and config.method.name != "adam":
+        label += "_adam"
+    return label
+
+
 def make_run_name(config, *, timestamp=None):
     """Use one timezone-aware timestamp across all three experiment directories."""
     timestamp = timestamp or datetime.now().astimezone()
-    label = config.method.name
-    if label == "sage_policy":
-        label = "sage_" + ("e" if config.reference.name == "error" else "l") + "_" + config.method.policy_mode
-        if config.method.policy_mode == "alternating" and config.method.alternating_first == "sage":
-            label += "_first_sage"
-    if label in ("sage", "sage_loo", "dtv", "dtv_loo"):
-        label = label.replace("_loo", "") + ("_e" if config.reference.name == "error" else "_l") + ("_loo" if label.endswith("_loo") else "")
-    if config.method.sage_warmup_percent:
-        label += "_warmup" + format(config.method.sage_warmup_percent, ".12g") + "pct"
+    label = method_label(config)
     parts = (config.data.name, config.data.mode, config.model.name, label,
              str(config.seed), format(config.training.learning_rate, ".12g"))
     # Label newly created decaying-rate runs in logs/files/runs and lifecycle

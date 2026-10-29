@@ -8,8 +8,8 @@ import tomllib
 from src.probes.mechanism_config import MechanismConfig
 
 
-METHODS = ("sgd", "sage", "sage_loo", "dtv", "dtv_loo", "random_flip", "sage_policy")
-REFERENCES = ("loss", "error")
+METHODS = ("sgd", "adam", "dpco", "dpco_loo", "dtv", "dtv_loo", "random_flip", "dpco_policy")
+REFERENCES = ("loss", "error", "correct", "ema")
 DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000}
 INATURALIST_PREPARED_DIR = "../data/inaturalist2021_full_t140000_v20000_s42"
 
@@ -39,12 +39,14 @@ class MethodConfig:
     flip_probability: float = 0.25
     policy_mode: str = "continuous"
     alternating_first: str = "sgd"
-    sage_warmup_percent: float = 0.0
+    dpco_warmup_percent: float = 0.0
+    negative_weight: float = -1.0
 
 
 @dataclass(frozen=True)
 class ReferenceConfig:
     name: str = "loss"
+    beta: float = 0.9
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,10 @@ class TrainingConfig:
     nesterov: bool = False
     lr_schedule: str = "constant"
     min_learning_rate: float = 0.0
+    optimizer: str = "sgd"
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_epsilon: float = 1e-8
 
 
 @dataclass(frozen=True)
@@ -146,23 +152,51 @@ class RunConfig:
             raise ValueError(f"Unknown method: {self.method.name}")
         if self.method.policy_mode not in ("continuous", "alternating", "half"):
             raise ValueError("policy_mode must be continuous, alternating or half")
-        if self.method.name != "sage_policy" and self.method.policy_mode != "continuous":
-            raise ValueError("Nondefault policy_mode requires method=sage_policy")
-        if self.method.alternating_first not in ("sgd", "sage"):
-            raise ValueError("alternating_first must be sgd or sage")
+        if self.method.name != "dpco_policy" and self.method.policy_mode != "continuous":
+            raise ValueError("Nondefault policy_mode requires method=dpco_policy")
+        if self.method.alternating_first not in ("sgd", "dpco"):
+            raise ValueError("alternating_first must be sgd or dpco")
         if self.method.alternating_first != "sgd" and not (
-                self.method.name == "sage_policy" and self.method.policy_mode == "alternating"):
-            raise ValueError("A nondefault alternating_first requires the alternating SAGE policy")
-        percent = self.method.sage_warmup_percent
+                self.method.name == "dpco_policy" and self.method.policy_mode == "alternating"):
+            raise ValueError("A nondefault alternating_first requires the alternating DPCO policy")
+        percent = self.method.dpco_warmup_percent
         if isinstance(percent, bool) or not math.isfinite(percent) or not 0 <= percent <= 100:
-            raise ValueError("sage_warmup_percent must be finite and in [0, 100]")
-        if percent and not (self.method.name == "sage" or (
-                self.method.name == "sage_policy" and self.method.policy_mode == "continuous")):
-            raise ValueError("SAGE warmup supports original sage and continuous SAGE only")
+            raise ValueError("dpco_warmup_percent must be finite and in [0, 100]")
+        if percent and not (self.method.name == "dpco" or (
+                self.method.name == "dpco_policy" and self.method.policy_mode == "continuous")):
+            raise ValueError("DPCO warmup supports original dpco and continuous DPCO only")
         if percent and self.probes.enabled:
-            raise ValueError("SAGE warmup requires legacy theorem probes off; use diagnostics/mechanisms for actual-phase checks")
+            raise ValueError("DPCO warmup requires legacy theorem probes off; use diagnostics/mechanisms for actual-phase checks")
         if self.reference.name not in REFERENCES:
             raise ValueError(f"Unknown reference: {self.reference.name}")
+        if (isinstance(self.reference.beta, bool) or not math.isfinite(self.reference.beta)
+                or not 0 <= self.reference.beta < 1):
+            raise ValueError("reference beta must be finite and in [0, 1)")
+        if (isinstance(self.method.negative_weight, bool) or not math.isfinite(self.method.negative_weight)):
+            raise ValueError("negative_weight must be a finite number")
+        if self.reference.name == "ema" and (
+                self.method.name != "dpco" or self.method.policy_mode != "continuous" or percent):
+            raise ValueError("EMA reference requires continuous dpco without method warmup")
+        if self.method.negative_weight != -1 and self.reference.name != "ema":
+            raise ValueError("negative_weight requires dpco with EMA reference")
+        if self.training.optimizer not in ("sgd", "adam"):
+            raise ValueError("optimizer must be sgd or adam")
+        if self.method.name == "adam" and self.training.optimizer != "adam":
+            raise ValueError("Plain adam method requires optimizer=adam")
+        for beta in (self.training.adam_beta1, self.training.adam_beta2):
+            if isinstance(beta, bool) or not math.isfinite(beta) or not 0 <= beta < 1:
+                raise ValueError("Adam betas must be finite and in [0, 1)")
+        epsilon = self.training.adam_epsilon
+        if isinstance(epsilon, bool) or not math.isfinite(epsilon) or epsilon <= 0:
+            raise ValueError("Adam epsilon must be finite and positive")
+        if self.training.optimizer == "adam" and (self.training.momentum or self.training.nesterov):
+            raise ValueError("Adam uses its own betas; SGD momentum/Nesterov must be off")
+        if (self.training.optimizer == "adam" or self.reference.name == "ema") and (
+                self.probes.enabled or self.diagnostics.enabled or self.mechanism.enabled):
+            raise ValueError("Adam/EMA runs require legacy theorem/diagnostic/mechanism observers off")
+        if self.reference.name == "correct" and (
+                self.method.name != "dpco" or self.method.dpco_warmup_percent != 0):
+            raise ValueError("Correct reference currently supports continuous dpco_r only, without method warmup")
         if not 0 <= self.method.flip_probability <= 1:
             raise ValueError("flip_probability must be in [0, 1]")
         classes = DATASET_CLASSES
@@ -240,8 +274,8 @@ class RunConfig:
         if not self.probes.lr_scales or any(not math.isfinite(s) or s <= 0
                                             for s in self.probes.lr_scales):
             raise ValueError("Probe learning-rate scales must be positive and finite")
-        if self.probes.enabled and self.method.name != "sage":
-            raise ValueError("Common-reference theorem probes currently require full sage")
+        if self.probes.enabled and self.method.name != "dpco":
+            raise ValueError("Common-reference theorem probes currently require full dpco")
         d = self.diagnostics
         self.mechanism.validate(self.training, self.method)
         for flag in (d.enabled, d.update_check, d.paired_loss, d.transfer):
@@ -259,8 +293,8 @@ class RunConfig:
         if d.enabled:
             if not (d.update_check or d.paired_loss or d.transfer):
                 raise ValueError("Enable at least one diagnostic check")
-            if self.method.name not in ("sgd", "sage", "sage_policy"):
-                raise ValueError("Real-update diagnostics cover SGD and full common-reference SAGE only")
+            if self.method.name not in ("sgd", "dpco", "dpco_policy"):
+                raise ValueError("Real-update diagnostics cover SGD and full common-reference DPCO only")
             if self.training.momentum != 0 or self.training.l2_coefficient != 0:
                 raise ValueError("Real-update diagnostics require momentum=0 and l2_coefficient=0")
         if not self.data.mode or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-." for c in self.data.mode):

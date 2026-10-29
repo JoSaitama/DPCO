@@ -13,7 +13,7 @@ from tests.helpers import QuadraticTask, scalar_batch
 
 class TrainerTests(unittest.TestCase):
     def test_learning_rate_applied_once_without_second_batch_division(self):
-        trainer = Trainer(QuadraticTask(), create_method("sage"), SGDUpdate(.1))
+        trainer = Trainer(QuadraticTask(), create_method("dpco"), SGDUpdate(.1))
         initial = TrainState({"x": jnp.zeros(1)}, {"calls": 0})
         result, metrics = trainer.step(initial, scalar_batch())
         np.testing.assert_allclose(result.params["x"], [-.1 * 7/6], atol=1e-6)
@@ -24,7 +24,7 @@ class TrainerTests(unittest.TestCase):
         self.assertEqual(int(metrics["valid_batch_size"]), 3)
 
     def test_all_six_methods_use_same_trainer_and_task(self):
-        for name in ("sgd", "sage", "sage_loo", "dtv", "dtv_loo", "random_flip"):
+        for name in ("sgd", "dpco", "dpco_loo", "dtv", "dtv_loo", "random_flip"):
             with self.subTest(method=name):
                 trainer = Trainer(QuadraticTask(), create_method(name), SGDUpdate(.1))
                 initial = TrainState({"x": jnp.zeros(1)}, {"calls": 0})
@@ -33,7 +33,7 @@ class TrainerTests(unittest.TestCase):
                 self.assertEqual(result.model_state["calls"], 1)
 
     def test_step_is_jittable_and_matches_eager(self):
-        for name in ("sgd", "sage_loo", "dtv", "random_flip"):
+        for name in ("sgd", "dpco_loo", "dtv", "random_flip"):
             with self.subTest(method=name):
                 trainer = Trainer(QuadraticTask(), create_method(name), SGDUpdate(.1))
                 initial = TrainState({"x": jnp.zeros(1)}, {"calls": 0})

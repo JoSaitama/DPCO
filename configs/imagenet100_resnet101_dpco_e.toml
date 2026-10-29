@@ -12,7 +12,7 @@ class_manifest = "configs/manifests/imagenet100_classes.txt"
 name = "resnet101"
 
 [method]
-name = "sage"
+name = "dpco"
 
 [reference]
 name = "error"

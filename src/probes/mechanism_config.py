@@ -47,8 +47,8 @@ class MechanismConfig:
         if isinstance(self.bank_seed, bool) or not isinstance(self.bank_seed, int) or not 0 <= self.bank_seed < 2**32:
             raise ValueError("Invalid mechanism.bank_seed")
         if self.enabled:
-            if method.name not in ("sgd", "sage"):
-                raise ValueError("Extended mechanisms currently cover original SGD/SAGE only; policy behavior is unchanged")
+            if method.name not in ("sgd", "dpco"):
+                raise ValueError("Extended mechanisms currently cover original SGD/DPCO only; policy behavior is unchanged")
             if training.momentum != 0 or training.l2_coefficient != 0 or training.nesterov:
                 raise ValueError("Extended mechanisms require momentum/L2/Nesterov off")
             if not (self.update_check or self.paired_loss or self.bank_moments or self.windows or self.oracle_steps):

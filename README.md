@@ -1,24 +1,33 @@
-# SAGE
+# DPCO
 
 Research code for SGD and sample-contribution correction with task/reference/method
 separation. Repository code, comments and documentation use English.
 
 ## Current stage
 
+The new [DPCO + Adam implementation](docs/dpco_adam.md) supports ordinary Adam
+and a current-inclusive raw-gradient EMA reference with configurable negative
+contributions: `--method dpco --negative-weight 0` filters, `-1` flips, and other
+finite weights are accepted. The separate preset is
+`configs/tpu/dpco/imagenet100_resnet50.toml`; use
+`--methods adam dpco_filter dpco_flip --dry-run` to inspect the three-group plan.
+This implements the method/update pipeline; controlled noise and grouped
+clean/corrupted evaluation remain separate planned work.
+
 [Opt-in TPU mechanism checks](docs/tpu_mechanisms.md) extend the real classification
 suite with both references, absolute LR candidates, a genuinely fixed train-mode
 bank, finite-bank moments and continuous-window accounting. They are off by
-default. `run_sage_mechanism_suite.sh` is the separate TPU wrapper; the existing
+default. `run_dpco_mechanism_suite.sh` is the separate TPU wrapper; the existing
 synthetic theory suite remains CPU-only. Development tests do not certify TPU.
 
 An independent [CPU theory/LR validation suite](docs/theory_validation.md) tests
-the original SGD/SAGE-E/SAGE-L on smooth synthetic classification data, with
+the original SGD/DPCO-E/DPCO-L on smooth synthetic classification data, with
 analytic counterexamples, conditional moments and full-target cumulative bounds.
-Run `./run_sage_theory_suite.sh --dry-run` to inspect its grid. It does not launch
+Run `./run_dpco_theory_suite.sh --dry-run` to inspect its grid. It does not launch
 TPU training, download data, save checkpoints or change the production/policy paths.
 
 The first real-device pipeline targets ImageNet-100, ResNet-50, and two sequential
-SGD/SAGE-E runs on node-ziao1 worker0. Worker1 remains idle and is not a peer. Later
+SGD/DPCO-E runs on node-ziao1 worker0. Worker1 remains idle and is not a peer. Later
 ImageNet-1K/ResNet-101 checks use the same adapters after first-stage validation.
 
 Implemented: a Flax ResNet V1.5 adapter, pinned Hugging Face data preparation, host-local
@@ -46,20 +55,20 @@ batches. Enable with `--diagnostics` through either shell suite; default is off.
 The observer preserves the selected optimizer and original compiled training step.
 Its switches are independent of the older fixed-batch theorem probes.
 
-## Opt-in continuous, alternating and half SAGE
+## Opt-in continuous, alternating and half DPCO
 
-Existing `sgd`, `sage_l` and `sage_e` commands keep their original implementations.
+Existing `sgd`, `dpco_l` and `dpco_e` commands keep their original implementations.
 New method aliases select a separate policy wrapper:
 
 | Loss reference | Error reference | Correction strength alpha |
 |---|---|---|
-| `sage_l_continuous` | `sage_e_continuous` | 1 on every update |
-| `sage_l_alternating` | `sage_e_alternating` | 0, 1, 0, 1, ... by default; first method is configurable |
-| `sage_l_half` | `sage_e_half` | 0.5 on every update |
+| `dpco_l_continuous` | `dpco_e_continuous` | 1 on every update |
+| `dpco_l_alternating` | `dpco_e_alternating` | 0, 1, 0, 1, ... by default; first method is configurable |
+| `dpco_l_half` | `dpco_e_half` | 0.5 on every update |
 
 The direction is `Gd + alpha * (Gs - Gd)` before the common learning-rate update.
 Half means filtering negative alignment with the original B denominator (the
-existing DTV calculation), not half the learning rate or separate complete SGD/SAGE
+existing DTV calculation), not half the learning rate or separate complete SGD/DPCO
 computations. Half still needs reference/alignment work; half strength does not
 promise half the wall time.
 Alternating uses a compiled conditional: SGD rounds skip reference/alignment work.
@@ -67,19 +76,19 @@ Each round commits one model state and one parameter update. The checkpointed
 policy counter preserves phase on resume, including resumes after an odd update.
 
 For either alternating alias, `--alternating-first sgd` (default) selects
-SGD -> SAGE -> SGD, while `--alternating-first sage` selects SAGE -> SGD -> SAGE.
+SGD -> DPCO -> SGD, while `--alternating-first dpco` selects DPCO -> SGD -> DPCO.
 This suite option applies only to alternating jobs; baseline, continuous and half
 jobs in the same grid are unchanged. It reaches both the nohup parent and child.
 The effective config stores method.alternating_first; changing it on resume is
-rejected. Runs using the nondefault SAGE-first order add `_first_sage` to their
+rejected. Runs using the nondefault DPCO-first order add `_first_dpco` to their
 directory label and status method value. Per-step policy_alpha/executed_method
 records show the actual order, and diagnostic metadata records its first method.
 
 An example server smoke suite (real TPU through the existing nohup launcher):
 
 ```bash
-nohup ./run_sage_suite.sh --mode smoke --steps 5 --batch-size 16 \
-  --methods sage_l_continuous sage_l_alternating sage_l_half sgd --seed 5 \
+nohup ./run_dpco_suite.sh --mode smoke --steps 5 --batch-size 16 \
+  --methods dpco_l_continuous dpco_l_alternating dpco_l_half sgd --seed 5 \
   --no-theorem-probes --diagnostics --diagnostic-steps 0 1 2 3 4 \
   --no-diagnostic-transfer --diagnostic-lr-scales 1 0.5 \
   >/dev/null 2>&1 < /dev/null &
@@ -93,35 +102,47 @@ status TSV keeps its existing start/end-only schema and identifies policy mode
 in its method value. Original jobs create no policy CSV.
 
 Use `--diagnostics` for the new modes. Legacy `--theorem-probes` remains restricted
-to the original full SAGE method and is not silently reinterpreted. Full-SAGE
+to the original full DPCO method and is not silently reinterpreted. Full-DPCO
 counterfactuals remain in diagnostic_paired/transfer; diagnostic_policy records
 the active policy versus SGD, with alpha-scaled objective gain and the real policy
 endpoint at scale 1. See [diagnostic semantics](docs/training_diagnostics.md).
 
-## Optional SGD prefix before SAGE
+## Exported CSV guide and local training plots
 
-`--sage-warmup-percent P` runs the first `ceil(total_steps * P / 100)`
-updates with SGD, then switches to the original full SAGE-E/L rule. Default
+See [the result CSV guide](docs/result_csv_guide.md) for every stream's fields,
+T1/T2/T3 scope, active-policy versus full-DPCO candidates, and Mac instructions.
+`scripts/plot_training_results.py` reads exported CSV/metadata without importing
+JAX or training code. It compares initial LRs by line style, uses blue for SGD,
+red for DPCO-E and orange for DPCO-L, and exports PNG/PDF/SVG plus provenance.
+Warmup comparisons separate fixed-10% LR effects (`warmup10`) from fixed-LR
+10%/30% SGD-prefix effects (`warmup_percent`); both include matching original
+SGD baselines. See the guide for percentage/LR selection parameters.
+Raw files are never edited; repeated comparable runs require explicit selection.
+
+## Optional SGD prefix before DPCO
+
+`--dpco-warmup-percent P` runs the first `ceil(total_steps * P / 100)`
+updates with SGD, then switches to the original full DPCO-E/L rule. Default
 `P=0` preserves the original method and compiled training path. `P=100` runs
 SGD for the entire budget. This is a method warmup, not a learning-rate warmup:
 the configured LR schedule continues on absolute completed updates throughout.
-For example, `--steps 5000 --sage-warmup-percent 10` uses SGD on updates 1–500
-and SAGE from update 501. The SGD prefix is part of the total training budget.
+For example, `--steps 5000 --dpco-warmup-percent 10` uses SGD on updates 1–500
+and DPCO from update 501. The SGD prefix is part of the total training budget.
 
 ```bash
-./run_sage_suite.sh --dry-run --methods sage_e sage_l sgd --seed 5 \
-  --steps 5000 --batch-size 256 --lr 0.01 --sage-warmup-percent 10 \
+./run_dpco_suite.sh --dry-run --methods dpco_e dpco_l sgd --seed 5 \
+  --steps 5000 --batch-size 256 --lr 0.01 --dpco-warmup-percent 10 \
   --no-theorem-probes
 ```
 
-The shared option applies to `sage_e`, `sage_l` and their `_continuous` aliases.
+The shared option applies to `dpco_e`, `dpco_l` and their `_continuous` aliases.
 SGD, half and alternating suite jobs keep their original behavior. In TOML set
-`method.sage_warmup_percent = 10.0`; nonzero values on unsupported methods are
+`method.dpco_warmup_percent = 10.0`; nonzero values on unsupported methods are
 rejected. Percentages must be finite and between 0 and 100, including endpoints.
 
 Warmup runs include `_warmup10pct` (or the chosen percentage) in their run names
 and lifecycle method label. `policy_steps.csv` records `policy_mode=warmup`,
-`policy_alpha=0/1` and `executed_method=sgd/sage` for each completed update;
+`policy_alpha=0/1` and `executed_method=sgd/dpco` for each completed update;
 printed train JSON includes the same fields. The config in `metadata.json`
 preserves the percentage, and suite dry-run reports the resolved update count.
 Checkpoint recovery preserves the absolute phase; changing the percentage or
@@ -131,10 +152,10 @@ unchanged. Compilation warmup discards its candidate and consumes no prefix step
 
 Legacy `--theorem-probes` is incompatible with this phased method; use
 `--no-theorem-probes`. Optional `--diagnostics` handles both phases and records
-the active direction separately from full-SAGE counterfactuals. Extended
-`--mechanisms` supports the original `sage_e/l` warmup runs: `actual_endpoint`
-is `sgd` during the prefix and `sage` afterwards, while source T1/pairs and
-conditional moments still describe hypothetical full-SAGE directions. The
+the active direction separately from full-DPCO counterfactuals. Extended
+`--mechanisms` supports the original `dpco_e/l` warmup runs: `actual_endpoint`
+is `sgd` during the prefix and `dpco` afterwards, while source T1/pairs and
+conditional moments still describe hypothetical full-DPCO directions. The
 extended observer retains its existing restriction on `_continuous` aliases.
 This option enables a controlled experiment; it does not guarantee stability
 or an advantage over SGD.
@@ -143,7 +164,7 @@ or an advantage over SGD.
 
 Use a separate Python 3.11+ environment. Do not reuse another project's dependencies:
 
-    cd ~/Project_SAGE/SAGE
+    cd ~/Project_DPCO/DPCO
     python3 --version
     python3 -m venv ../.venv
     source ../.venv/bin/activate
@@ -161,7 +182,7 @@ tokens never belong in configuration or Git. Optional interactive checks:
 First run offline foreground CPU sanity:
 
     python scripts/sanity_check.py --config configs/tpu/imagenet100_resnet50_sgd.toml
-    python scripts/sanity_check.py --config configs/tpu/imagenet100_resnet50_sage_e.toml
+    python scripts/sanity_check.py --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 
 CPU scripts were renamed from smoke_test.py/smoke_recording.py to
 sanity_core.py/sanity_recording.py. Their synthetic linear classifier is not ResNet.
@@ -171,9 +192,9 @@ Then launch a real TPU smoke with the supplied nohup wrapper:
     python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_sgd.toml
 
 It prints the PID and exact per-run stdout.log path. Monitor that path with tail -f.
-After SGD completes successfully, launch SAGE-E:
+After SGD completes successfully, launch DPCO-E:
 
-    python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_sage_e.toml
+    python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 
 For these single direct Python launches, no outer nohup is needed: the launcher uses detached input,
 unbuffered output and a new session. Both jobs must run sequentially on worker0.
@@ -192,18 +213,18 @@ images, with three updates by default. It is not a complete dataset/theory bench
 ## Shell suites and seed overrides
 
 Use the executable root script for training suites. It defaults to train mode,
-ImageNet-100, ResNet-50, SAGE-E, clean data and seed 42, using the TPU pilot config.
+ImageNet-100, ResNet-50, DPCO-E, clean data and seed 42, using the TPU pilot config.
 The global batch defaults to 256 for train/validate and 8 for smoke. An explicit
 `--batch-size` overrides either mode; all four local TPU devices share this batch.
-The Python interpreter defaults to outer Project_SAGE/.venv/bin/python; set SAGE_PYTHON
+The Python interpreter defaults to outer Project_DPCO/.venv/bin/python; set DPCO_PYTHON
 to another project-specific interpreter path if needed. The script works from any cwd.
 
-Example: three sequential SAGE-E TPU smokes, with three updates each:
+Example: three sequential DPCO-E TPU smokes, with three updates each:
 
 ```bash
-nohup ./run_sage_suite.sh \
+nohup ./run_dpco_suite.sh \
   --mode smoke --dataset imagenet100 --model resnet50 \
-  --methods sage_e --seeds 10 15 22 --data-mode clean \
+  --methods dpco_e --seeds 10 15 22 --data-mode clean \
   >/dev/null 2>&1 < /dev/null &
 ```
 
@@ -214,8 +235,8 @@ config; an explicit seed in a custom config is
 honored when the CLI omits seeds. To resume an older seed-0 run, pass `--seed 0` and
 retain all its original settings. Resume permits just one seed/method.
 
-`--methods sage_e sage_l sgd` runs each method for each listed seed, in seed-major
-order. The method labels select sage/error, sage/loss, or unmodified SGD. Select
+`--methods dpco_e dpco_l sgd` runs each method for each listed seed, in seed-major
+order. The method labels select dpco/error, dpco/loss, or unmodified SGD. Select
 `--dataset imagenet100|imagenet1k|inaturalist2021`, `--model resnet50|resnet101`, and `--data-mode clean`
 (`--datamode` is an alias). Mismatch modes are reserved and rejected before any job
 starts; a directory label never silently simulates noisy data. All grid configurations
@@ -229,19 +250,19 @@ overrides the logical batch. The wrapper always waits, so use the outer nohup ab
 to keep the whole queue alive after SSH disconnect. Preview without starting jobs:
 
 ```bash
-./run_sage_suite.sh --methods sage_e sage_l sgd --seeds 10 15 --dry-run
+./run_dpco_suite.sh --methods dpco_e dpco_l sgd --seeds 10 15 --dry-run
 ```
 
 The independent `run_inaturalist_suite.sh` entry accepts the same options. Pilot
 defaults: ResNet-50 from scratch, training seed 5, 2,000 steps/method, B=256,
 constant LR=0.01, L2/momentum/Nesterov off, validation every epoch, probes off,
-method order `sage_e sgd sage_l`. These are screening settings, not a tuned recipe.
+method order `dpco_e sgd dpco_l`. These are screening settings, not a tuned recipe.
 
 ```bash
 ./run_inaturalist_suite.sh --dry-run
 mkdir -p results/logs/inaturalist2021_seed5_suite
 nohup ./run_inaturalist_suite.sh --mode train --seeds 5 \
-  --methods sage_e sgd sage_l --steps 2000 \
+  --methods dpco_e sgd dpco_l --steps 2000 \
   --data-dir ../data/inaturalist2021_full_t140000_v20000_s42 \
   >results/logs/inaturalist2021_seed5_suite/launcher.log 2>&1 < /dev/null &
 ```
@@ -346,7 +367,7 @@ names retain their original format; resume continues to use the explicit saved n
 Preview a configured suite without launching or downloading:
 
 ```bash
-./run_sage_suite.sh --methods sage_e sage_l sgd --seeds 2 5 7 \
+./run_dpco_suite.sh --methods dpco_e dpco_l sgd --seeds 2 5 7 \
   --batch-size 256 --momentum 0.9 --lr 0.1 \
   --lr-schedule cosine --min-lr 0 --l2-coefficient 0 --dry-run
 ```
@@ -373,7 +394,7 @@ download is necessary and no HF checkpoint is silently used.
 
 Data is streamed from the official ILSVRC/imagenet-1k HF repository at a pinned commit.
 The versioned CMC manifest fixes 100 synsets, original 1K labels and the 0..99 mapping.
-Only selected original image bytes are cached in outer Project_SAGE/data/ using SQLite.
+Only selected original image bytes are cached in outer Project_DPCO/data/ using SQLite.
 No full archive or duplicate Arrow dataset is deliberately materialized. Full 100-class
 preparation may still read much of the ~154 GB original train/validation source over
 the network; limited smoke preparation stops after a small number of selected images.
@@ -389,22 +410,55 @@ Training shuffles a complete local epoch deterministically, then applies reprodu
 random resized crops/flips. Incomplete training tails are dropped so BatchNorm never
 sees padding; evaluation covers every valid example with a masked padded final batch.
 
-## SAGE-E and SAGE-L
+## DPCO-E, DPCO-L and continuous DPCO-R
 
-Both variants use ordinary per-image cross entropy and its current-parameter gradient.
-Prediction error selects a reference; raw gradient alignment decides correction.
+All three variants use ordinary per-image cross entropy and its current-parameter
+gradient. Prediction feedback selects a reference; raw gradient alignment decides correction.
 
 | Experiment label | Method | Reference | Definition |
 | --- | --- | --- | --- |
-| SAGE-E / sage_e | sage | error | Mean gradient of currently misclassified valid batch examples |
-| SAGE-L / sage_l | sage | loss | Mean gradient of all valid batch examples |
+| DPCO-E / dpco_e | dpco | error | Mean gradient of currently misclassified valid batch examples |
+| DPCO-R / dpco_r | dpco | correct | Mean gradient of currently correctly classified valid batch examples |
+| DPCO-L / dpco_l | dpco | loss | Mean gradient of all valid batch examples |
 
 For error, freeze the current selection E = {i: argmax(logits_i) != label_i} when
 differentiating its surrogate mean loss. Rebuild it each batch. No historical error
 buffer or derivative of a 0/1 objective is used. Loss means the entire current batch,
 not a high-loss subset or exact population gradient.
 
-Score every valid contribution with q_i = r^T g_i. SAGE uses weight -1 for a negative
+For correct, freeze R = {i: argmax(logits_i) == label_i} within the current
+valid batch and average those examples' CE gradients. Recompute R on each real
+batch. This is not the gradient of accuracy or a persistent correct-sample buffer.
+An empty correct set falls back to SGD; an all-correct batch makes R/L identical.
+The correct-reference denominator is |R|, while the final update denominator
+remains the full valid B. Every valid example is scored and can be flipped,
+including correct examples that conflict with their set's mean gradient.
+
+The first R implementation supports only continuous `--methods dpco_r`, with
+no method warmup, half, alternating or LOO variant. Existing E/L/SGD commands
+and optimizer defaults are unchanged. No new preset is required; the suite
+override composes method=dpco with reference=correct on the existing base config.
+For example, run this manually on worker0 to request a real nohup TPU smoke:
+
+```bash
+nohup ./run_dpco_suite.sh --mode smoke --methods dpco_r --seeds 5 \
+  --steps 5 --batch-size 16 --lr 0.01 --lr-schedule constant \
+  --momentum 0 --no-nesterov --l2-coefficient 0 \
+  --no-checkpoints --no-theorem-probes --diagnostics \
+  --diagnostic-steps 0 1 2 3 4 --no-diagnostic-transfer \
+  --diagnostic-lr-scales 1 0.5 >/dev/null 2>&1 < /dev/null &
+```
+
+New run directories include `_dpco_r_`; metadata/status store reference=correct.
+Optional paired observers label the frozen reference objective `frozen_correct_ce`
+(or `source_frozen_correct_ce` in mechanism streams), separately from full-batch
+and fixed-bank targets. Empty correct sets do not emit a fictitious correct-set CE.
+Existing `error_count` fields retain their literal error-count meaning.
+Mechanism R runs add correct-reference comparisons and bank moments; old E/L/SGD
+runs retain their original observer workload. Existing synthetic CPU theory and
+E/L plotting suites are not extended to R by this training change.
+
+Score every valid contribution with q_i = r^T g_i. DPCO uses weight -1 for a negative
 score and +1 otherwise, including zero. Return sum(w_i*g_i)/B using the original valid
 B; preserve gradient magnitude, do not cosine/unit-normalize, and apply LR once.
 An erroneous example is not automatically flipped; a correct example may be flipped.
@@ -424,7 +478,7 @@ is inferred from the final gradient tensor size alone. Training BN
 uses the same realized logical batch in all derivative passes, with state committed
 once. These per-example loss derivatives can include BN cross-example coupling.
 
-SGD skips reference construction. There is no sgd_e method. sage_e/sage_l are
+SGD skips reference construction. There is no sgd_e method. dpco_e/dpco_l/dpco_r are
 experiment labels; method and reference remain separate configuration fields.
 
 ## Components and other methods
@@ -444,7 +498,7 @@ commit hypothetical updates.
 | Method | Nonnegative score | Negative score |
 | --- | --- | --- |
 | sgd | +1 | +1 |
-| sage | +1 | -1 |
+| dpco | +1 | -1 |
 | dtv | +1 | 0 |
 | random_flip | Independent Bernoulli(p) flip | Independent Bernoulli(p) flip |
 
@@ -460,12 +514,12 @@ The eight root presets remain core integration configurations. The two runnable 
 profiles are in configs/tpu/ and share data, initialization, LR, B and budget.
 
 - smoke: real TPU/model, limited real data, probes off in supplied profiles, short budget.
-- validate: full selected data, configured T1-3 probes on a SAGE trajectory.
+- validate: full selected data, configured T1-3 probes on a DPCO trajectory.
 - train: full selected data and configured budget; probes normally disabled.
 
 Example controlled diagnostics after smoke succeeds:
 
-    python scripts/launch_tpu.py --mode validate --steps 20 --config configs/tpu/imagenet100_resnet50_sage_e.toml
+    python scripts/launch_tpu.py --mode validate --steps 20 --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 
 This can require a long first data preparation. Sparse audit gradients can be costly.
 Reference gains and target-transfer diagnostics do not by themselves prove the
@@ -509,7 +563,7 @@ and augmentation. No distributed checkpoint guarantee is implied.
     python -m pip install -e '.[test]'
     JAX_PLATFORMS=cpu JAX_PLATFORM_NAME=cpu python -m unittest discover -s tests -v
     python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_sgd.toml --dry-run
-    python main.py --check-config --config configs/tpu/imagenet100_resnet50_sage_e.toml
+    python main.py --check-config --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 
 Tests include independent analytic directions, JVP/Jacobian parity, BN state handling,
 real 50/101 parameter shapes, two-CPU global batch/BN parity, deterministic data

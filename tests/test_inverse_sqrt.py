@@ -92,7 +92,7 @@ class InverseSqrtTests(unittest.TestCase):
             self.assertIsNone(result.optimizer_state)
 
     def test_tiny_fixture_resume_and_recorded_rates_for_all_original_methods(self):
-        for method, reference in (("sgd", "loss"), ("sage", "error"), ("sage", "loss")):
+        for method, reference in (("sgd", "loss"), ("dpco", "error"), ("dpco", "loss")):
             with self.subTest(method=method, reference=reference), TemporaryDirectory() as tmp:
                 config = fixture_config(tmp)
                 config = replace(config, method=replace(config.method, name=method),
@@ -120,11 +120,11 @@ class InverseSqrtTests(unittest.TestCase):
                             train_sample_count=5, metadata={}, console=False, run_name="inverse", resume=True)
 
     def test_all_shell_suites_forward_schedule_in_configuration_only_dry_run(self):
-        env = {**os.environ, "SAGE_PYTHON": sys.executable}
-        for entry in ("run_sage_suite.sh", "run_inaturalist_suite.sh", "run_sage_mechanism_suite.sh"):
+        env = {**os.environ, "DPCO_PYTHON": sys.executable}
+        for entry in ("run_dpco_suite.sh", "run_inaturalist_suite.sh", "run_dpco_mechanism_suite.sh"):
             with self.subTest(entry=entry):
                 output = subprocess.check_output(["bash", str(ROOT / entry), "--dry-run",
-                    "--methods", "sgd", "sage_e", "sage_l", "--seeds", "2", "--steps", "5000",
+                    "--methods", "sgd", "dpco_e", "dpco_l", "--seeds", "2", "--steps", "5000",
                     "--lr", ".01", "--lr-schedule", "inverse_sqrt", "--min-lr", "0"],
                     cwd=gettempdir(), env=env, text=True)
                 plans = json.loads(output)
@@ -141,7 +141,7 @@ class InverseSqrtTests(unittest.TestCase):
                     self.assertEqual(learning_rate_for(child.training)(99), .001)
 
     def test_cpu_theory_cli_accepts_schedule_without_running_experiments(self):
-        output = subprocess.check_output([sys.executable, str(ROOT / "scripts/validate_sage_theory.py"),
+        output = subprocess.check_output([sys.executable, str(ROOT / "scripts/validate_dpco_theory.py"),
             "--dry-run", "--schedules", "inverse_sqrt", "--methods", "sgd", "--lrs", ".01"], text=True)
         self.assertEqual(json.loads(output)["grid"][0]["schedule"], "inverse_sqrt")
 

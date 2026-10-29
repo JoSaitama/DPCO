@@ -43,7 +43,7 @@ class ReferenceTests(unittest.TestCase):
         params = {"x": jnp.zeros(1)}
         batch = (jnp.array([[-1.], [2.]]), jnp.ones(2, dtype=jnp.bool_), jnp.zeros(2, dtype=jnp.bool_))
         expected = create_method("sgd").compute_direction(task, params, batch).direction
-        for name in ("sage", "sage_loo", "dtv", "dtv_loo"):
+        for name in ("dpco", "dpco_loo", "dtv", "dtv_loo"):
             actual = create_method(name, reference_name="error").compute_direction(task, params, batch).direction
             np.testing.assert_allclose(actual["x"], expected["x"])
 

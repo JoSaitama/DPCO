@@ -33,7 +33,7 @@ from src.training.updates import SGDUpdate
 from tests.test_observation import ROOT, fixture_config, fixture_components, read_rows
 
 
-def components(root, *, name="sage", reference="error", enabled=True):
+def components(root, *, name="dpco", reference="error", enabled=True):
     config = replace(fixture_config(root), method=MethodConfig(name), reference=ReferenceConfig(reference),
         mechanism=MechanismConfig(enabled=enabled, steps=(0, 1, 3), moment_steps=(0,), oracle_steps=(0,),
             absolute_lrs=(0., .01, .02), lr_scales=(1.,), windows=((0, 4),), bank_batches=1, norm_matched=True))
@@ -58,7 +58,7 @@ def rows_for(observer, trainer, before, batch, eta=.01):
 
 class TPUMechanismTests(unittest.TestCase):
     def test_same_state_references_identity_absolute_lr_and_actual_endpoints(self):
-        for method, reference in (("sgd", "loss"), ("sage", "error"), ("sage", "loss")):
+        for method, reference in (("sgd", "loss"), ("dpco", "error"), ("dpco", "loss")):
             with self.subTest(method=method, reference=reference), TemporaryDirectory() as tmp:
                 config, trainer, source, _, before, observer = components(tmp, name=method, reference=reference)
                 with patch("jax.jacrev", side_effect=AssertionError("Dense Jacobian forbidden")):
@@ -66,7 +66,7 @@ class TPUMechanismTests(unittest.TestCase):
                 t1 = [r for s,r in rows if s == "mechanism_t1"]
                 self.assertEqual({r["reference"] for r in t1}, {"error", "loss", "exact_bank_reference_oracle"})
                 for row in t1:
-                    self.assertEqual(row["trajectory_method"], "sgd" if method=="sgd" else "sage_e" if reference=="error" else "sage_l")
+                    self.assertEqual(row["trajectory_method"], "sgd" if method=="sgd" else "dpco_e" if reference=="error" else "dpco_l")
                     self.assertAlmostEqual(row["reference_delta"], row["delta_formula"], delta=2e-6)
                     self.assertEqual(row["negative_count"], row["flip_count"])
                 pairs = [r for s,r in rows if s == "mechanism_pairs"]
@@ -76,7 +76,7 @@ class TPUMechanismTests(unittest.TestCase):
                     if row["candidate_kind"] == "actual_pair":
                         self.assertEqual(row["probe_lr"], .01)
                         self.assertEqual(row["normalization"], "original")
-                        if method == "sage":
+                        if method == "dpco":
                             self.assertEqual(row["reference"], reference)
                         else:
                             self.assertEqual(row["actual_endpoint"], "sgd")
@@ -95,9 +95,9 @@ class TPUMechanismTests(unittest.TestCase):
         for batch in source.batches:
             both = observer._sources(state.params, batch, state.model_state)
             for name, stats in both.items():
-                dense = create_method("sage", reference_name=name, gradient_backend="audit")
+                dense = create_method("dpco", reference_name=name, gradient_backend="audit")
                 direction = dense.compute_direction(trainer.task, state.params, batch).direction
-                for a,b in zip(jax.tree_util.tree_leaves(direction), jax.tree_util.tree_leaves(stats.sage)):
+                for a,b in zip(jax.tree_util.tree_leaves(direction), jax.tree_util.tree_leaves(stats.dpco)):
                     np.testing.assert_allclose(a, b, atol=2e-6)
 
     def test_frozen_buffers_target_id_and_read_only_inputs(self):
@@ -106,12 +106,12 @@ class TPUMechanismTests(unittest.TestCase):
             z = (x-jnp.mean(x, axis=0)) @ p["w"] + s["offset"]
             return jnp.concatenate((jnp.zeros_like(z), z), axis=1), {"offset": s["offset"]+.7}
         task = ClassificationTask(model, 2)
-        method = create_method("sage", reference_name="error", gradient_backend="jvp")
+        method = create_method("dpco", reference_name="error", gradient_backend="jvp")
         trainer = Trainer(task, method, SGDUpdate(.01))
         batch = classification_batch([[1.],[-2.],[3.],[-1.]], [1,0,0,1])
         before = TrainState({"w": jnp.array([[.3]])}, {"offset": jnp.array([.2])})
         cfg = MechanismConfig(enabled=True, bank_batches=1)
-        observer = TPUMechanisms(task, method, cfg, reference_name="error", trajectory_method="sage",
+        observer = TPUMechanisms(task, method, cfg, reference_name="error", trajectory_method="dpco",
             bank_batches=(TrainingAuditBatch("global", batch),), fixed_buffers=before.model_state)
         target = observer.target
         original_hash = tree_fingerprint(target.buffers)
@@ -163,7 +163,7 @@ class TPUMechanismTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,"configuration differs"):
                         ExperimentRunner(changed,t2,s2,e2,base_dir=ROOT,train_sample_count=5,
                             metadata={},mechanism=o2,console=False,run_name="run",resume=True)
-                    different=TPUMechanisms(t2.task,t2.method,c2.mechanism,reference_name="error",trajectory_method="sage",
+                    different=TPUMechanisms(t2.task,t2.method,c2.mechanism,reference_name="error",trajectory_method="dpco",
                         bank_batches=o2.target.batches,fixed_buffers=initial.model_state,signature="changed_target")
                     with self.assertRaisesRegex(ValueError,"fixed mechanism target differs"):
                         ExperimentRunner(c2,t2,s2,e2,base_dir=ROOT,train_sample_count=5,
@@ -212,12 +212,12 @@ class TPUMechanismTests(unittest.TestCase):
                 self.assertEqual(loss["negative_count"],0)
                 undefined=[r for s,r in rows if s=="mechanism_pairs" and r["reference"]=="loss"
                     and r["normalization"]=="norm_matched"]
-                self.assertTrue(all(not r["defined"] and r["undefined_reason"]=="zero_sage_norm" for r in undefined))
+                self.assertTrue(all(not r["defined"] and r["undefined_reason"]=="zero_dpco_norm" for r in undefined))
             else:
                 error=next(r for s,r in rows if s=="mechanism_t1" and r["reference"]=="error")
                 self.assertFalse(error["reference_valid"])
                 self.assertEqual(error["flip_count"],0)
-                self.assertEqual(error["norm_sgd_sq"],error["norm_sage_sq"])
+                self.assertEqual(error["norm_sgd_sq"],error["norm_dpco_sq"])
                 self.assertFalse(any(s=="mechanism_pairs" and r["reference"]=="error"
                     and r["objective"]=="source_frozen_error_ce" for s,r in rows))
 
@@ -227,13 +227,13 @@ class TPUMechanismTests(unittest.TestCase):
         batch=next(source)
         _,rows=rows_for(observer,trainer,before,batch)
         stats=observer._sources(before.params,batch,before.model_state)["error"]
-        candidate=jax.tree_util.tree_map(lambda p,g:p-2*g,before.params,stats.sage)
+        candidate=jax.tree_util.tree_map(lambda p,g:p-2*g,before.params,stats.dpco)
         result=trainer.task.evaluate(candidate,batch,before.model_state)
         self.assertFalse(np.array_equal(np.asarray(stats.errors),np.asarray(result.feedback["error_mask"])))
         expected=float(jnp.sum(jnp.where(stats.errors,result.losses,0.))/jnp.sum(stats.errors))
         row=next(r for s,r in rows if s=="mechanism_pairs" and r["reference"]=="error"
             and r["objective"]=="source_frozen_error_ce" and r["candidate_kind"]=="independent_pair")
-        self.assertAlmostEqual(row["j_sage"],expected,places=6)
+        self.assertAlmostEqual(row["j_dpco"],expected,places=6)
 
     def test_duplicate_lr_labels_reuse_candidate_forwards_and_original_gain_semantics(self):
         counts=[]
@@ -263,7 +263,7 @@ class TPUMechanismTests(unittest.TestCase):
         # Original labels are zero; prediction error is therefore class1.
         wrong=classification_batch(batch.images,1-predicted.astype(jnp.int32),batch.valid_mask)
         both=observer._sources(before.params,wrong,before.model_state)
-        np.testing.assert_allclose(both["error"].sage["w"],both["loss"].sage["w"],atol=2e-6)
+        np.testing.assert_allclose(both["error"].dpco["w"],both["loss"].dpco["w"],atol=2e-6)
         observer.compute_dtype="bfloat16"
         _,rows=rows_for(observer,trainer,before,batch)
         update=next(r for s,r in rows if s=="mechanism_update")
@@ -309,9 +309,9 @@ class TPUMechanismTests(unittest.TestCase):
     def test_cli_toml_forwarding_and_production_defaults(self):
         path=ROOT/"configs/tpu/imagenet100_resnet50_sgd.toml"
         self.assertFalse(load_config(path).mechanism.enabled)
-        env={**os.environ,"SAGE_PYTHON":sys.executable}
-        for suite in ("run_sage_suite.sh","run_inaturalist_suite.sh","run_sage_mechanism_suite.sh"):
-            command=["bash",str(ROOT/suite),"--config",str(path),"--mode","train","--methods","sgd","sage_e","sage_l",
+        env={**os.environ,"DPCO_PYTHON":sys.executable}
+        for suite in ("run_dpco_suite.sh","run_inaturalist_suite.sh","run_dpco_mechanism_suite.sh"):
+            command=["bash",str(ROOT/suite),"--config",str(path),"--mode","train","--methods","sgd","dpco_e","dpco_l",
                 "--steps","4","--mechanisms","--mechanism-steps","0","2","--mechanism-moment-steps","1",
                 "--mechanism-oracle-steps","2","--mechanism-windows","0:4","--mechanism-absolute-lrs","0",".003",".02",
                 "--mechanism-norm-matched","--no-theorem-probes","--dry-run"]
@@ -328,8 +328,8 @@ class TPUMechanismTests(unittest.TestCase):
             self.assertTrue(load_config(custom).mechanism.enabled)
         with self.assertRaisesRegex(ValueError,"sorted, disjoint"):
             replace(fixture_config("unused"),mechanism=MechanismConfig(windows=((1,3),(2,4)))).validate()
-        with self.assertRaisesRegex(ValueError,"original SGD/SAGE"):
-            resolve_config(path,mode="train",method="sage_l_half",mechanisms=True)
+        with self.assertRaisesRegex(ValueError,"original SGD/DPCO"):
+            resolve_config(path,mode="train",method="dpco_l_half",mechanisms=True)
 
     def test_two_device_global_bn_and_dense_oracle(self):
         env={**os.environ,"JAX_PLATFORMS":"cpu","JAX_PLATFORM_NAME":"cpu",

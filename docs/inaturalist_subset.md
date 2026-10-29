@@ -35,7 +35,7 @@ a new selection directory/counts before retrying.
 Use the project's isolated Python 3.11+ environment on worker0:
 
 ```bash
-cd ~/Project_SAGE/SAGE
+cd ~/Project_DPCO/DPCO
 source ../.venv/bin/activate
 python -m pip install -e '.[data]'
 python scripts/prepare_inaturalist.py --stage plan --selection-seed 42
@@ -50,7 +50,7 @@ remain allocated after the smaller validation index replaces its rows.
 Default destination, outside Git:
 
 ```text
-Project_SAGE/data/inaturalist2021_full_t140000_v20000_s42/
+Project_DPCO/data/inaturalist2021_full_t140000_v20000_s42/
   .prepare.lock
   selection.json
   manifest.json
@@ -148,7 +148,7 @@ the data fingerprint and cursor. No new CSV streams or observation fields are ad
 Preview defaults without TPU initialization or local data access:
 
 ```bash
-cd ~/Project_SAGE/SAGE
+cd ~/Project_DPCO/DPCO
 source ../.venv/bin/activate
 ./run_inaturalist_suite.sh --dry-run
 ```
@@ -158,7 +158,7 @@ Run the three real-TPU smokes sequentially first (default three updates, B=8):
 ```bash
 mkdir -p results/logs/inaturalist2021_seed5_smoke_suite
 nohup ./run_inaturalist_suite.sh --mode smoke --seeds 5 \
-  --methods sage_e sgd sage_l \
+  --methods dpco_e sgd dpco_l \
   --data-dir ../data/inaturalist2021_full_t140000_v20000_s42 \
   >results/logs/inaturalist2021_seed5_smoke_suite/launcher.log 2>&1 < /dev/null &
 ```
@@ -174,7 +174,7 @@ After smoke passes, launch the 2,000-step pilot:
 mkdir -p results/logs/inaturalist2021_seed5_train_suite
 nohup ./run_inaturalist_suite.sh \
   --mode train --dataset inaturalist2021 --model resnet50 --data-mode clean \
-  --methods sage_e sgd sage_l --seeds 5 --steps 2000 --batch-size 256 \
+  --methods dpco_e sgd dpco_l --seeds 5 --steps 2000 --batch-size 256 \
   --data-dir ../data/inaturalist2021_full_t140000_v20000_s42 \
   --lr 0.01 --lr-schedule constant --min-lr 0 \
   --momentum 0 --no-nesterov --l2-coefficient 0 \
@@ -203,15 +203,15 @@ results/files, with inaturalist2021 in its run name. The existing start/end TSV,
 CSV schemas, seven checkpoint slots and save-before-cleanup order are reused.
 The first failure stops the queue; outer nohup protects the waiting coordinator.
 
-For existing theorem probes, use `--mode validate --methods sage_e` (or sage_l)
+For existing theorem probes, use `--mode validate --methods dpco_e` (or dpco_l)
 in a separate queue. SGD remains `--mode train`; validate mode rejects it because
-common-reference probes require SAGE. Fractions/LR scales stay in TOML, and T3
+common-reference probes require DPCO. Fractions/LR scales stay in TOML, and T3
 retains the current fixed-audit diagnostic scope. No theorem definitions change.
 
 Resume one method/seed with its original settings, including any CLI overrides:
 
 ```bash
-nohup ./run_inaturalist_suite.sh --mode train --methods sage_e --seeds 5 \
+nohup ./run_inaturalist_suite.sh --mode train --methods dpco_e --seeds 5 \
   --resume YOUR_RUN_NAME --resume-slot latest \
   >results/logs/inaturalist2021_seed5_train_suite/resume.log 2>&1 < /dev/null &
 ```

@@ -25,22 +25,22 @@ def main():
     initial=TrainState({"w":jnp.array([[.5]])},{"offset":jnp.array([.2])})
     b1=classification_batch(np.array([[5.],[1.],[-2.],[-4.]],np.float32),np.array([1,1,0,1],np.int32))
     b2=classification_batch(np.array([[2.],[-6.],[1.],[3.]],np.float32),np.array([1,0,1,0],np.int32))
-    method=create_method("sage",reference_name="loss",gradient_backend="jvp")
+    method=create_method("dpco",reference_name="loss",gradient_backend="jvp")
     trainer=LocalMeshTrainer(task,method,SGDUpdate(.01),local_mesh(jax.local_devices()))
     before=jax.device_put(initial,trainer.replicated)
     batch=jax.device_put(b1,trainer.batch_sharding)
     bank=tuple(TrainingAuditBatch(str(i),jax.device_put(b,trainer.batch_sharding)) for i,b in enumerate((b1,b2)))
     cfg=MechanismConfig(enabled=True,steps=(0,),moment_steps=(0,),oracle_steps=(0,),
         absolute_lrs=(0.,.01),lr_scales=(),bank_batches=2,windows=((0,1),))
-    observer=TPUMechanisms(task,method,cfg,reference_name="loss",trajectory_method="sage",
+    observer=TPUMechanisms(task,method,cfg,reference_name="loss",trajectory_method="dpco",
         bank_batches=bank,fixed_buffers=before.model_state,signature="global_bn_fixture")
     after,_=trainer.compile_step()(before,batch,jax.random.key(0))
     rows=observer.run(before,after,batch,learning_rate=.01,rng_key=jax.random.key(0),context={},cumulative_eta_before=0.)
     for reference in ("loss","error"):
         independent=observer._sources(before.params,batch,before.model_state)[reference]
-        dense=create_method("sage",reference_name=reference,gradient_backend="audit")
+        dense=create_method("dpco",reference_name=reference,gradient_backend="audit")
         expected=dense.compute_direction(task,initial.params,b1,initial.model_state)
-        for a,b in zip(jax.tree_util.tree_leaves(independent.sage),jax.tree_util.tree_leaves(expected.direction)):
+        for a,b in zip(jax.tree_util.tree_leaves(independent.dpco),jax.tree_util.tree_leaves(expected.direction)):
             np.testing.assert_allclose(a,b,rtol=2e-5,atol=2e-6)
     def objective(p):
         return .5*sum(jnp.mean(task.evaluate(p,b,initial.model_state).losses) for b in (b1,b2))

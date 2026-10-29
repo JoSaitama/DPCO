@@ -1,23 +1,31 @@
 # Opt-in TPU T1/T2/fixed-target/LR mechanisms
 
 This extends the REAL classification training path. It is not the synthetic CPU
-theory suite and does not replace SGD/SAGE with an analytic optimizer. Existing
+theory suite and does not replace SGD/DPCO with an analytic optimizer. Existing
 methods, strict-negative flips, valid-B means, Trainer/update/policy code and
 default training computations are unchanged. Only optional observation, private
 recording schemas, configuration forwarding and extra observer resume state are
 connected to the existing experiment runner. No TPU run was performed during
 development; the tests below are CPU/offline semantic checks.
 
+Continuous DPCO-R is also accepted through `--methods dpco_r`. Its actual
+reference is the mean CE gradient over currently correct valid samples.
+Only R trajectories add a third source/bank reference named `correct`; existing
+E/L/SGD runs still evaluate their original two references. R pairs include
+`source_frozen_correct_ce` when nonempty. The existing `error_count` field remains
+the number of errors, not the R selection size. No CSV column, target-bank
+definition, numerical reliability gate or actual optimizer update changes.
+
 ## Existing versus new capabilities
 
-File map (paths relative to the independent SAGE repository):
+File map (paths relative to the independent DPCO repository):
 
 | Files | Reason |
 |---|---|
 | src/probes/mechanism_config.py | New dependency-light flags, validation, TOML/CLI conversion |
 | src/probes/fixed_training_bank.py | New immutable fixed-target assets, fingerprints and streamed target gradients |
 | src/probes/tpu_mechanisms.py | New read-only diagnostics, private schemas, compiled stages and window state |
-| run_sage_mechanism_suite.sh; configs/tpu/mechanisms/imagenet100_resnet50.toml | New bounded qualification entry and isolated preset |
+| run_dpco_mechanism_suite.sh; configs/tpu/mechanisms/imagenet100_resnet50.toml | New bounded qualification entry and isolated preset |
 | src/config.py; src/training/launch.py; scripts/launch_tpu.py | Append optional config and forward it through existing parent/child/dry-run |
 | scripts/train_classification.py | Construct observer/bank only under the new master switch |
 | src/training/experiment.py | Guarded observation, private recorder schemas, target/prefix consistency and opt-in checkpoint state |
@@ -38,11 +46,11 @@ reference, trainer/update implementation, policy file or legacy CSV schema chang
 | Per-audit-batch transfer | Ordinary-source transfer AND a separate uniform finite-bank enumeration |
 | Sparse observations | Explicit consecutive windows, with actual-displacement telescoping decomposition |
 
-The independent CPU suite remains `run_sage_theory_suite.sh`. This TPU entry is
-`run_sage_mechanism_suite.sh`, which delegates to the existing single-host nohup
+The independent CPU suite remains `run_dpco_theory_suite.sh`. This TPU entry is
+`run_dpco_mechanism_suite.sh`, which delegates to the existing single-host nohup
 TPU coordinator. Both regular ImageNet and iNaturalist suites also accept the new
 flags. Original policies can still use their existing diagnostics; the new
-mechanism observer intentionally accepts only original sgd/sage_e/sage_l.
+mechanism observer intentionally accepts only original sgd/dpco_e/dpco_l.
 
 ## Switches, defaults and cost
 
@@ -146,11 +154,11 @@ and no flips indicate the SGD fallback. Zero LR ratios/residuals are blank.
 `independent_pair` constructs BOTH candidates from independent frozen directions.
 `actual_pair` is a SEPARATE row only at the actual LR, for the actual matching
 method/reference. Actual SGD can be compared with either counterfactual E/L;
-actual SAGE-E cannot be used as a SAGE-L or oracle endpoint, or conversely.
+actual DPCO-E cannot be used as a DPCO-L or oracle endpoint, or conversely.
 Both grids remain labeled even if an absolute and relative entry coincide.
 
 Norm matching uses eta_s=eta_d*||Gd||/||Gs|| ONLY for hypothetical candidates.
-Zero SAGE norm gives an undefined row, not an epsilon denominator. Zero SGD norm
+Zero DPCO norm gives an undefined row, not an epsilon denominator. Zero SGD norm
 gives eta_s=0. Original Delta/gain is retained separately from the effective
 norm-matched objective gain; the residual uses that effective gain. A norm-matched
 candidate is never called a real update or an original-Delta guarantee.
@@ -178,7 +186,7 @@ R=F_A(after)-F_A(before)+P. For a complete window check
 F_A(end)-F_A(start)=-sum P+sum R, with raw residual and explicit tolerance.
 R is the measured nonlinear/numerical remainder. No unknown ResNet smoothness
 constant is manufactured and R is not called an L-smooth upper bound. The
-identity does not order independent SGD/SAGE paths or prove an acceleration rate.
+identity does not order independent SGD/DPCO paths or prove an acceleration rate.
 
 Timing separates compile, setup, training, diagnostics and IO. Existing timing.csv
 contains real training windows/compile warmup; mechanism_timing adds observer
@@ -203,7 +211,7 @@ E_t||Gs||^2 <= M||h||^2+sigma_s^2 and eta0 <= a/(LM), this predetermined schedul
 gives the weighted expected stationarity bound O(log(T)/sqrt(T)). Its squared
 rates are not summable; it is not an almost-sure convergence claim. No uniform
 a, M or valid path L is certified for this ResNet. Eta0=.01 is a historical
-comparison scale, not a proven admissible threshold or a promised SAGE advantage.
+comparison scale, not a proven admissible threshold or a promised DPCO advantage.
 
 The separate T2 sufficient condition uses C=Gs-Gd and
 eta < 2*Delta/[L*(2||Gd||||C||+||C||^2)] for the matching source objective.
@@ -217,14 +225,14 @@ User-run command ONLY, after checking the existing full ImageNet100 cache and
 available worker0. It schedules exactly three original methods, not an LR grid:
 
 ```bash
-cd ~/Project_SAGE/SAGE
+cd ~/Project_DPCO/DPCO
 source ../.venv/bin/activate
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 suite_dir="results/logs/inverse_sqrt_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$suite_dir"
-nohup bash ./run_sage_mechanism_suite.sh \
+nohup bash ./run_dpco_mechanism_suite.sh \
   --mode train --dataset imagenet100 --model resnet50 --data-mode clean \
-  --methods sgd sage_e sage_l --seeds 2 --steps 5000 --batch-size 256 \
+  --methods sgd dpco_e dpco_l --seeds 2 --steps 5000 --batch-size 256 \
   --lr 0.01 --lr-schedule inverse_sqrt --min-lr 0 \
   --momentum 0 --no-nesterov --l2-coefficient 0 \
   --no-checkpoints --eval-every-steps 1000 \
@@ -268,7 +276,7 @@ and fixed-bank H, actual/independent and original/norm-matched labels;
 mechanism_transfer for Lambda; mechanism_moments for full h_A-dot-direction
 versus correction projections and finite-bank energies; mechanism_timing for cost.
 F_A is a fixed training proxy, not full ImageNet. Small unresolved differences,
-negative Lambda, ascent directions and unfavorable SAGE results must all remain.
+negative Lambda, ascent directions and unfavorable DPCO results must all remain.
 
 Historical seed2 constant .01 exported training CSVs can be reused as descriptive
 curves. They lack metadata/input fingerprints and the new mechanism target ID;
@@ -288,11 +296,11 @@ only dry-run inspected during this development task. Use the existing worker0
 project environment and already prepared data; no extra TPU resources are created.
 
 ```bash
-cd ~/Project_SAGE/SAGE
+cd ~/Project_DPCO/DPCO
 source ../.venv/bin/activate
-bash ./run_sage_mechanism_suite.sh \
+bash ./run_dpco_mechanism_suite.sh \
   --config configs/tpu/mechanisms/imagenet100_resnet50.toml \
-  --methods sgd sage_e sage_l --dry-run
+  --methods sgd dpco_e dpco_l --dry-run
 ```
 
 Qualification:3 original methods, seed2, LR.01, B256,12 actual updates, K2,
@@ -301,9 +309,9 @@ norm matching, selected absolute/relative LR pairs and a single oracle node.
 
 ```bash
 mkdir -p results/logs/mechanism_qualification
-nohup bash ./run_sage_mechanism_suite.sh \
+nohup bash ./run_dpco_mechanism_suite.sh \
   --config configs/tpu/mechanisms/imagenet100_resnet50.toml \
-  --methods sgd sage_e sage_l --seeds 2 \
+  --methods sgd dpco_e dpco_l --seeds 2 \
   --steps 12 --batch-size 256 --lr 0.01 \
   --lr-schedule constant --momentum 0 --no-nesterov --l2-coefficient 0 \
   --no-checkpoints \
@@ -321,7 +329,7 @@ nohup bash -c '
 set -euo pipefail
 common=(
   --config configs/tpu/mechanisms/imagenet100_resnet50.toml
-  --methods sgd sage_e sage_l --seeds 2 --steps 200 --batch-size 256
+  --methods sgd dpco_e dpco_l --seeds 2 --steps 200 --batch-size 256
   --lr-schedule constant --momentum 0 --no-nesterov --l2-coefficient 0
   --no-checkpoints --eval-every-steps 200
   --mechanism-steps 0 1 5 10 20 25 30 50 75 100 150 199
@@ -333,12 +341,12 @@ for rate in 0.005 0.01 0.02; do
   else
     windows=(--mechanism-windows)
   fi
-  bash ./run_sage_mechanism_suite.sh "${common[@]}" --lr "$rate" "${windows[@]}"
+  bash ./run_dpco_mechanism_suite.sh "${common[@]}" --lr "$rate" "${windows[@]}"
 done
 ' >results/logs/mechanism_short_grid/suite.log 2>&1 < /dev/null &
 ```
 
-Loss signs or SAGE wins are never qualification criteria. Keep failed/unreliable
+Loss signs or DPCO wins are never qualification criteria. Keep failed/unreliable
 observations. Do not scale up based on CPU tests, process completion, or one
 favorable short trace. Actual TPU precision, compilation, memory and runtime
 remain unmeasured until these commands are separately authorized and executed.

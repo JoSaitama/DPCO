@@ -16,7 +16,7 @@ results/files. Its format is:
 
 Time uses the host timezone, recorded with an offset in metadata. Name collisions raise
 an error; they never silently overwrite a run. Reference choice remains separate in
-configuration, while directory labels use sage_e/sage_l (and explicit LOO suffixes).
+configuration, while directory labels use dpco_e/dpco_l (and explicit LOO suffixes).
 SGD does not acquire an error/loss reference just because it shares the same trainer.
 
 `metadata.json` stores the full configuration, original code commit, dirty status and source hash,
@@ -44,7 +44,7 @@ evaluate theta_k. Losses are original, unsigned CE, not the signed weighted obje
 | train_steps.csv | step, samples_seen, epoch_progress, learning_rate, valid_batch_size, train_ce, train_top1, elapsed_wall_s | Per-batch loss/accuracy curves and diagnostics |
 | evaluation.csv | step/progress, eval_sample_count, val_ce, val_top1, val_top5, elapsed_wall_s, eval_duration_s | Generalization curves, final results, and best selection |
 | theorem1.csv | counts, reference validity, projections, Delta, eta*Delta; node rows also retain independent formula residual and direction norms | Aggregation identity and reference gain |
-| theorem2.csv | objective/mode/batch identity, frozen subset count, LR/scale, initial and hypothetical SGD/SAGE losses, difference/LR, first-order residual, direction norms, validity flags | Same-origin finite-step probes |
+| theorem2.csv | objective/mode/batch identity, frozen subset count, LR/scale, initial and hypothetical SGD/DPCO losses, difference/LR, first-order residual, direction norms, validity flags | Same-origin finite-step probes |
 | theorem3.csv | per-step cumulative reference gain and LR sums; node audit loss/gradient norm, target gain, transfer difference, sample energy, direction norms | Exact reference-gain accumulation and sparse target-transfer diagnostics |
 | timing.csv | event, step, duration, window updates/examples, throughput, wall time, checkpoint bytes, device-specific peak memory when supported | Efficiency and resource accounting |
 | summary.csv | completion/failure status, final validation CE/top-1/top-5, best validation top-1/step, steps/examples, total wall time | One-run table inputs; failures remain visible |
@@ -91,8 +91,8 @@ timestamp\trun_name\tattempt_id\tdataset\tdata_mode\tmodel\tmethod\treference\ts
 Each launch/resume attempt writes only two rows: `event=start, status=running`, then
 `event=end, status=completed` or `event=end, status=failed`. There are no step/error
 columns or progress rows. Detailed errors and step history remain in per-run JSON
-logs and CSV. Method is the internal policy (sage/sgd); reference distinguishes error
-from loss for SAGE and is blank for SGD/random-flip.
+logs and CSV. Method is the internal policy (dpco/sgd); reference distinguishes error
+from loss for DPCO and is blank for SGD/random-flip.
 
 The child writes start before TPU initialization/data preparation, using its PID.
 Completion is deferred until loop flushing and child cleanup succeed. A failed spawn
@@ -108,7 +108,7 @@ existing TSV has an incompatible header, startup fails with a cleanup instructio
 its bytes remain unchanged. A missing/empty TSV receives the current header. Older
 run directories are not scanned or backfilled.
 
-The obsolete outer `.tools/smoke_sage_e_3seeds.py` helper is not part of the repository
+The obsolete outer `.tools/smoke_dpco_e_3seeds.py` helper is not part of the repository
 and is no longer needed once its jobs finish. Temporary seed/reference configs may
 also be removed after use. Keep the new repository `scripts/run_suite.py`, which the
 shell entry uses. Do not delete the whole `.tools` directory blindly: it may also hold
@@ -174,9 +174,9 @@ distinct model states, and crossed thresholds on the same update produce one rec
 
 ## Read-only theorem measurements
 
-The common-reference probes currently support full sage, not LOO. They are optional;
+The common-reference probes currently support full dpco, not LOO. They are optional;
 when disabled the runner performs no probe forward/gradient work and creates no theorem
-CSV. SGD never computes extra reference gradients just to match SAGE diagnostics.
+CSV. SGD never computes extra reference gradients just to match DPCO diagnostics.
 
 T1 lightweight scalars reuse the existing scores and direction each step when enabled.
 No full per-sample gradient matrices are saved. At probe nodes, compute both
@@ -195,8 +195,8 @@ bitwise equality across different reduction orders is not promised. Sequential
 energy remains expensive and its time belongs to the existing probe timing event.
 
 T2 holds inputs, model state, common reference, and the selected current error mask
-fixed. Evaluate hypothetical SGD and SAGE updates at every configured LR scale. These
-updates do not alter real parameters, LR, training source, or training RNG. SAGE-E's
+fixed. Evaluate hypothetical SGD and DPCO updates at every configured LR scale. These
+updates do not alter real parameters, LR, training source, or training RNG. DPCO-E's
 frozen error CE and complete batch CE are separate objectives; the latter uses its own
 first-order target projection. An empty error subset has no error-CE row. All scales
 are kept, including failures and steps without an advantage. A probe adapter must use
@@ -210,7 +210,7 @@ must be a fixed differentiable training measurement with fixed processing/model-
 semantics. It is not validation data fed back into the update. Sparse audits do not
 verify a full per-step convergence inequality. Changing batch/error losses cannot be
 telescoped as though they were one fixed F. No unknown global smoothness constant is
-estimated here and no convergence-rate or universal SAGE advantage is asserted.
+estimated here and no convergence-rate or universal DPCO advantage is asserted.
 
 For an exact fixed-reference theorem experiment, supply a separate controlled protocol;
 current-batch error-reference training is a target-transfer experiment. Gradient variance
@@ -225,7 +225,7 @@ logging, validation, checkpointing, probes, or CSV flush. A 1-step log interval 
 can cost more than 5-step/percentage logging. Do not infer pure device execution time
 from differences between per-step dispatch timestamps.
 
-Compile/warmup, active training windows (including input loading and all mandatory SAGE
+Compile/warmup, active training windows (including input loading and all mandatory DPCO
 work), evaluation, probes, and checkpoint events are recorded separately. Warmup uses
 one batch and discards its candidate update, then restores the source state. Later new
 shapes can cause JAX recompilation and will be included in the affected train window;
@@ -272,7 +272,7 @@ The directory is a single-writer run; concurrent processes must not share it.
 
 ## Offline plots and tables
 
-Use the same budget and evaluation protocol for SGD/SAGE. Plot against step, samples,
+Use the same budget and evaluation protocol for SGD/DPCO. Plot against step, samples,
 and elapsed wall time. Integrate accuracy/loss curves offline over a declared common
 horizon; this curve integral is not ROC-AUC. Final means the last fixed-budget state,
 not best. Best is reported separately. Across independent seeds compute final mean/std

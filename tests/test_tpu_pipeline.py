@@ -70,7 +70,7 @@ class TPUPipelineTests(unittest.TestCase):
 
     def test_real_adapters_record_and_resume_through_the_shared_loop(self):
         with TemporaryDirectory() as tmp:
-            config = load_config(ROOT / "configs/tpu/imagenet100_resnet50_sage_e.toml")
+            config = load_config(ROOT / "configs/tpu/imagenet100_resnet50_dpco_e.toml")
             config = replace(config, global_batch_size=2,
                 training=replace(config.training, total_steps=2),
                 data=replace(config.data, image_size=8),
@@ -83,7 +83,7 @@ class TPUPipelineTests(unittest.TestCase):
                 params, buffers = initialize(model, 0, 8)
                 train_task = ClassificationTask(model_adapter(model, train=True), 100)
                 eval_task = ClassificationTask(model_adapter(model, train=False), 100)
-                method = create_method("sage", reference_name="error", gradient_backend="jvp")
+                method = create_method("dpco", reference_name="error", gradient_backend="jvp")
                 trainer = LocalMeshTrainer(train_task, method, SGDUpdate(.01), local_mesh(jax.local_devices()))
                 initial = jax.device_put(TrainState(params, buffers), trainer.replicated)
                 evaluation = EvaluationSpec(eval_task, lambda: evaluation_batches(images, 2, 8), 3)
@@ -106,7 +106,7 @@ class TPUPipelineTests(unittest.TestCase):
                 images.close()
 
     def test_jvp_matches_full_jacobian_for_full_reference_methods(self):
-        for name in ("sage", "dtv"):
+        for name in ("dpco", "dtv"):
             for reference in ("error", "loss"):
                 with self.subTest(name=name, reference=reference):
                     args = (QuadraticTask(), {"x": jnp.array([.1])}, scalar_batch())
@@ -123,7 +123,7 @@ class TPUPipelineTests(unittest.TestCase):
                                      np.array([0, 1, 2], np.int32))
         results = []
         for backend in ("audit", "jvp"):
-            method = create_method("sage", reference_name="error", gradient_backend=backend)
+            method = create_method("dpco", reference_name="error", gradient_backend=backend)
             results.append(jax.jit(lambda p, s: method.compute_direction(task, p, batch, s))(params, state))
         for left, right in zip(jax.tree_util.tree_leaves(results[0].direction), jax.tree_util.tree_leaves(results[1].direction)):
             np.testing.assert_allclose(left, right, rtol=1e-4, atol=2e-6)
@@ -141,7 +141,7 @@ class TPUPipelineTests(unittest.TestCase):
     def test_sharded_step_uses_global_direction_and_preserves_mesh_when_recording(self):
         mesh = local_mesh(jax.local_devices())
         task = QuadraticTask()
-        method = create_method("sage", reference_name="error", gradient_backend="jvp")
+        method = create_method("dpco", reference_name="error", gradient_backend="jvp")
         trainer = LocalMeshTrainer(task, method, SGDUpdate(.1), mesh)
         # This numerical check uses a classification-shaped batch with the real
         # ClassificationTask; the earlier quadratic task checks reference math.
@@ -209,8 +209,8 @@ class TPUPipelineTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             configure_worker0(config, environ={}, hostname="node-w-0")
         with self.assertRaises(RuntimeError):
-            configure_worker0(config, environ={"SAGE_BACKGROUND_LAUNCH": "1"}, hostname="node-w-1")
-        env = {"SAGE_BACKGROUND_LAUNCH": "1", "JAX_PROCESS_COUNT": "2"}
+            configure_worker0(config, environ={"DPCO_BACKGROUND_LAUNCH": "1"}, hostname="node-w-1")
+        env = {"DPCO_BACKGROUND_LAUNCH": "1", "JAX_PROCESS_COUNT": "2"}
         settings = configure_worker0(config, environ=env, hostname="node-w-0")
         self.assertEqual(settings["TPU_PROCESS_BOUNDS"], "1,1,1")
         self.assertNotIn("JAX_PROCESS_COUNT", env)

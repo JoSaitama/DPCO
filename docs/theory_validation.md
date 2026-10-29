@@ -16,7 +16,7 @@ to50% for any deterministic classifier; optimal CE is log(2) at theta0.
 Accuracy is recorded but is uninformative about optimization on this deliberately
 contradictory dataset. This is not an image-classification benchmark.
 
-Actual updates call existing ClassificationTask, original SGD or JVP SAGE,
+Actual updates call existing ClassificationTask, original SGD or JVP DPCO,
 Trainer.step and SGDUpdate. L uses the source-batch mean gradient; E uses the
 current misclassified subset's mean CE gradient. The error mask/weights are
 frozen. All valid contributions can flip, only strictly negative scores flip,
@@ -44,8 +44,8 @@ Use the project environment with existing test dependencies. The limited run
 actually executed for this implementation is:
 
 ```bash
-./run_sage_theory_suite.sh \
-  --seeds 5 --methods sgd sage_e sage_l \
+./run_dpco_theory_suite.sh \
+  --seeds 5 --methods sgd dpco_e dpco_l \
   --lrs 0.01 0.1 --schedules constant cosine \
   --steps 60 --batch-size 8 \
   --probe-steps 0 5 20 59 --probe-count 128 \
@@ -53,7 +53,7 @@ actually executed for this implementation is:
   --case-mc-samples 4096 --output results/theory_validation
 ```
 
-`SAGE_PYTHON=/absolute/path/to/python` overrides the interpreter. Both JAX platform
+`DPCO_PYTHON=/absolute/path/to/python` overrides the interpreter. Both JAX platform
 variables are explicitly CPU. `--dry-run` prints the grid without JAX initialization
 or file writes; `--analytic-only` runs cases A/B/C. `--no-probes` or `--probe-count 0`
 disables paired/moment sampling; cheap full-data observation and cases still run.
@@ -64,7 +64,7 @@ by the 2026-10-25 theory-driven plan. The finite run above is historical evidenc
 not an instruction to repeat a training grid. The minimal scheduler extension also
 accepts `--schedules inverse_sqrt` through this CPU interface, but no CPU training
 grid is authorized or executed in the scheduler-only task. Real TPU commands use
-run_sage_mechanism_suite.sh; see docs/tpu_mechanisms.md.
+run_dpco_mechanism_suite.sh; see docs/tpu_mechanisms.md.
 
 Every method gets the same grid/budget. `best_in_finite_grid.json` selects lowest
 final unsigned full-training CE per method/seed/schedule, allowing different best
@@ -99,7 +99,7 @@ Rows retain T1 residual Delta+2/B*sum(min(q,0)), transfer residual
 Lambda-Delta+mismatch, and energy slack mean(||g_i||^2)-||Gs||^2.
 The paired residual is H/eta+grad(J)^T(Gs-Gd). Only the matching reference
 objective identifies this gain with Delta; the full target uses Lambda.
-No unproved SGD-style sigma-squared/B bound is imposed on SAGE.
+No unproved SGD-style sigma-squared/B bound is imposed on DPCO.
 
 MC standard errors are sample SD/sqrt(n), not proofs. The alignment ratio is
 undefined/blank if ||h||^2<=1e-12, with no hidden epsilon. Frozen-state probes
@@ -126,7 +126,7 @@ Negative gains and unfavorable LR results are never filtered out.
 The suite's logs/theory_validation_{timestamp}/analytic_cases.json records:
 
 - **A, T1/T2/trajectory limits:** the prescribed two-quadratic case, theta0=.25,
-  eta=.1, updated through existing methods/Trainer. SAGE cycles around +/- .05;
+  eta=.1, updated through existing methods/Trainer. DPCO cycles around +/- .05;
   SGD first has lower trajectory loss at update16. At common theta=.05,
   H=.0002375 matches -eta*Delta+eta^2*(1-theta^2)/2. This is finite-step cost
   with exact reference, not a reference mismatch.
@@ -142,7 +142,7 @@ The suite's logs/theory_validation_{timestamp}/analytic_cases.json records:
 The finite run completed all12 jobs,720 real updates. All analytic checks and all
 recorded cumulative bounds passed. Final unsigned full-training float32 CE:
 
-| Schedule | Initial LR | SGD | SAGE-E | SAGE-L |
+| Schedule | Initial LR | SGD | DPCO-E | DPCO-L |
 |---|---:|---:|---:|---:|
 | constant | .01 | .811682 | .788811 | .794205 |
 | constant | .1 | .696025 | .693227 | .711293 |
@@ -150,10 +150,10 @@ recorded cumulative bounds passed. Final unsigned full-training float32 CE:
 | cosine to0 | .1 | .718633 | .693147 | .695481 |
 
 The single-seed tiny-data grid separates T1 gain, a valid T3-type cumulative
-inequality and final trajectory ordering. SAGE-L loses in one constant-LR row
+inequality and final trajectory ordering. DPCO-L loses in one constant-LR row
 and wins in the cosine row; neither is universal. At tiny probe LRs, float32
 subtraction can dominate H/eta, and those residuals remain in the output. This
-does not establish the cause of the ResNet reversal or global SAGE convergence.
+does not establish the cause of the ResNet reversal or global DPCO convergence.
 
 Final verification passed all160 CPU/offline tests, including an injected failing
 LR followed by a successful LR in the same grid. The final bounded rerun's suite
@@ -166,7 +166,7 @@ Minimum raw sample-energy slack was .2190; minimum raw cumulative-bound slack
 over all720 updates was1.8773e-6. All runs shared one training-index fingerprint.
 These are numerical checks at the tested states, not global certification.
 
-At the late SAGE-E/cosine/.1 state59, a hypothetical .1 probe step had positive
+At the late DPCO-E/cosine/.1 state59, a hypothetical .1 probe step had positive
 target correction projection about3.47e-5 but full-target H about1.95e-4>0,
 consistent with a finite-step cost overwhelming the small first-order gain.
 The ACTUAL final cosine LR was zero; this probe must not be described as its

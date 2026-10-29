@@ -2,18 +2,16 @@ seed = 42
 global_batch_size = 256
 
 [data]
-name = "imagenet100"
-num_classes = 100
+name = "imagenet1k"
+num_classes = 1000
 image_size = 224
 mode = "clean"
-# Select the same class manifest for SAGE-E and its SGD baseline.
-class_manifest = "configs/manifests/imagenet100_classes.txt"
 
 [model]
-name = "resnet50"
+name = "resnet101"
 
 [method]
-name = "sage"
+name = "dpco"
 
 [reference]
 name = "error"

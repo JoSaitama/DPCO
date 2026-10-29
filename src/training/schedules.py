@@ -16,9 +16,9 @@ def milestone_steps(total_steps, fractions=(0., .25, .5, .75, 1.)):
     return {max(0, min(total_steps, math.ceil(total_steps * p))) for p in fractions}
 
 
-def sage_warmup_steps(config):
+def dpco_warmup_steps(config):
     """Number of real SGD-prefix updates; unrelated to learning-rate warmup."""
-    return math.ceil(config.training.total_steps * config.method.sage_warmup_percent / 100)
+    return math.ceil(config.training.total_steps * config.method.dpco_warmup_percent / 100)
 
 
 class EventSchedule:

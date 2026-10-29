@@ -21,7 +21,7 @@ from src.training.results import ResultsPaths
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs/tpu/imagenet100_resnet50_sage_e.toml"
+CONFIG = ROOT / "configs/tpu/imagenet100_resnet50_dpco_e.toml"
 
 
 class SuiteTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual([p["seed"] for p in self.dry_run("--seeds", "1", "2")], [1, 2])
 
     def test_method_grid_and_child_config_round_trip(self):
-        plans = self.dry_run("--methods", "sage_e", "sage_l", "sgd", "--seeds", "10", "15",
+        plans = self.dry_run("--methods", "dpco_e", "dpco_l", "sgd", "--seeds", "10", "15",
                              "--dataset", "imagenet1k", "--model", "resnet101", "--datamode", "clean")
         self.assertEqual(len(plans), 6)
         self.assertEqual([(p["seed"], p["reference"]) for p in plans[:3]],
@@ -60,8 +60,8 @@ class SuiteTests(unittest.TestCase):
             self.assertIn(f"_{resolved.seed}_", plan["stdout"])
 
     def test_shell_entry_works_outside_repo_and_defaults_to_train_and_wait(self):
-        env = {**os.environ, "SAGE_PYTHON": sys.executable}
-        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run"],
+        env = {**os.environ, "DPCO_PYTHON": sys.executable}
+        output = subprocess.check_output([str(ROOT / "run_dpco_suite.sh"), "--dry-run"],
                                          cwd=gettempdir(), env=env, text=True)
         plan = json.loads(output)
         self.assertEqual(plan["mode"], "train")
@@ -74,9 +74,9 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(self.dry_run("--batch-size", "128")["batch_size"], 128)
 
     def test_optimizer_options_round_trip_from_shell_to_child_and_config(self):
-        env = {**os.environ, "SAGE_PYTHON": sys.executable}
-        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
-            "--methods", "sage_e", "sage_l", "sgd", "--seeds", "2", "5",
+        env = {**os.environ, "DPCO_PYTHON": sys.executable}
+        output = subprocess.check_output([str(ROOT / "run_dpco_suite.sh"), "--dry-run",
+            "--methods", "dpco_e", "dpco_l", "sgd", "--seeds", "2", "5",
             "--momentum", ".9", "--nesterov", "--lr", ".1", "--lr-schedule", "cosine",
             "--min-lr", ".001", "--batch-size", "128"], cwd=gettempdir(), env=env, text=True)
         plans = json.loads(output)
@@ -108,9 +108,9 @@ class SuiteTests(unittest.TestCase):
 
     def test_optional_l2_reaches_every_child_and_explicit_zero_overrides_config(self):
         self.assertEqual(self.dry_run()["l2_coefficient"], 0.)
-        env = {**os.environ, "SAGE_PYTHON": sys.executable}
-        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
-            "--methods", "sage_e", "sage_l", "sgd", "--l2-coefficient", "0.0001"],
+        env = {**os.environ, "DPCO_PYTHON": sys.executable}
+        output = subprocess.check_output([str(ROOT / "run_dpco_suite.sh"), "--dry-run",
+            "--methods", "dpco_e", "dpco_l", "sgd", "--l2-coefficient", "0.0001"],
             cwd=gettempdir(), env=env, text=True)
         for plan in json.loads(output):
             self.assertEqual(plan["l2_coefficient"], .0001)
@@ -126,9 +126,9 @@ class SuiteTests(unittest.TestCase):
 
     def test_checkpoint_interval_round_trips_from_shell_to_every_child(self):
         self.assertEqual(self.dry_run()["checkpoint_every_steps"], 100)
-        env = {**os.environ, "SAGE_PYTHON": sys.executable}
-        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
-            "--methods", "sage_e", "sage_l", "sgd", "--seeds", "2", "5",
+        env = {**os.environ, "DPCO_PYTHON": sys.executable}
+        output = subprocess.check_output([str(ROOT / "run_dpco_suite.sh"), "--dry-run",
+            "--methods", "dpco_e", "dpco_l", "sgd", "--seeds", "2", "5",
             "--checkpoint-every-steps", "10"], cwd=gettempdir(), env=env, text=True)
         plans = json.loads(output)
         self.assertEqual(len(plans), 6)
@@ -171,12 +171,12 @@ class SuiteTests(unittest.TestCase):
     def test_evaluation_overrides_round_trip_through_shell_and_child(self):
         default = self.dry_run()
         self.assertEqual((default["evaluation_mode"], default["evaluation_interval"]), ("epochs", 1.))
-        env = {**os.environ, "SAGE_PYTHON": sys.executable}
+        env = {**os.environ, "DPCO_PYTHON": sys.executable}
         for flag, value, mode in (("--eval-every-steps", "10", "steps"),
                                   ("--eval-every-epochs", "0.25", "epochs")):
             with self.subTest(flag=flag):
-                output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
-                    "--methods", "sage_e", "sage_l", "sgd", "--seeds", "2", "5",
+                output = subprocess.check_output([str(ROOT / "run_dpco_suite.sh"), "--dry-run",
+                    "--methods", "dpco_e", "dpco_l", "sgd", "--seeds", "2", "5",
                     "--checkpoint-every-steps", "17", flag, value], cwd=gettempdir(), env=env, text=True)
                 plans = json.loads(output)
                 self.assertEqual(len(plans), 6)

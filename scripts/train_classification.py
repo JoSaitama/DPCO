@@ -11,7 +11,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.training.launch import absolute_path, add_overrides, diagnostic_overrides, resolve_config
+from src.training.launch import absolute_path, add_overrides, diagnostic_overrides, dpco_overrides, dpco_cli_args, resolve_config
 from src.training.runtime import configure_worker0, require_local_tpu
 from src.training.results import ResultsPaths
 from src.training.status import RunStatus
@@ -36,7 +36,7 @@ def run(args, config, devices, *, status):
     from src.training.local_mesh import LocalMeshTrainer, local_mesh
     from src.training.metrics import task_metrics
     from src.training.updates import make_updater
-    from src.training.schedules import sage_warmup_steps
+    from src.training.schedules import dpco_warmup_steps
 
     batch_size, image_size = config.global_batch_size, config.data.image_size
     if batch_size % len(devices):
@@ -63,8 +63,11 @@ def run(args, config, devices, *, status):
         method = create_method(config.method.name, reference_name=config.reference.name,
             flip_probability=config.method.flip_probability, gradient_backend="jvp",
             policy_mode=config.method.policy_mode, alternating_first=config.method.alternating_first,
-            warmup_steps=sage_warmup_steps(config))
-        if config.method.name == "sage_policy" or sage_warmup_steps(config):
+            warmup_steps=dpco_warmup_steps(config), reference_beta=config.reference.beta,
+            negative_weight=config.method.negative_weight)
+        if config.reference.name == "ema":
+            state = state._replace(method_state=jax.device_put(method.initial_state(params), replicated))
+        elif config.method.name == "dpco_policy" or dpco_warmup_steps(config):
             state = state._replace(method_state=jax.device_put(method.initial_state(), replicated))
         trainer = LocalMeshTrainer(train_task, method, updater, mesh)
         source = ImageBatchSource(images, batch_size, image_size, config.seed)
@@ -136,7 +139,10 @@ def run(args, config, devices, *, status):
             "normalization": "ImageNet mean/std; train random resized crop and horizontal flip; eval resize/center crop",
             "train_tail": "drop_last_to_exclude_padding_from_training_batchnorm",
             "evaluation_tail": "padded_with_valid_count_weighting",
-            "optimizer": "SGD update with configured optional momentum/Nesterov, coupled L2 and constant/cosine/inverse_sqrt LR; no decoupled weight decay, clipping or norm matching",
+            "optimizer": config.training.optimizer,
+            "update_semantics": "Adam uses edited direction and its elementwise square; optional coupled kernel L2; no AdamW, clipping or norm matching" if config.training.optimizer == "adam" else "SGD with optional momentum/Nesterov and coupled kernel L2",
+            "reference_semantics": "bias-corrected EMA of raw global batch gradients, current batch included; independent of Adam moments" if config.reference.name == "ema" else config.reference.name,
+            "sample_weight_semantics": "negative alignment gets method.negative_weight; zero/positive gets 1; original valid B denominator; stop-gradient weights" if config.reference.name == "ema" else "legacy method",
             "model": config.model.name, "model_initialization": "random",
             "model_source_revision": "81b168d62f151feca9e8e7abc591df80168395b4",
             "parameter_count": sum(leaf.size for leaf in jax.tree_util.tree_leaves(params)),
@@ -169,7 +175,7 @@ def main():
                             steps=args.steps, batch_size=args.batch_size, seed=args.seed,
                             method=args.method, dataset=args.dataset, model=args.model,
                             alternating_first=args.alternating_first,
-                            sage_warmup_percent=args.sage_warmup_percent,
+                            dpco_warmup_percent=args.dpco_warmup_percent,
                             data_mode=args.data_mode, data_dir=args.data_dir,
                             l2_coefficient=args.l2_coefficient,
                             momentum=args.momentum, nesterov=args.nesterov,
@@ -178,7 +184,7 @@ def main():
                             checkpoint_every_steps=args.checkpoint_every_steps,
                             checkpoints=args.checkpoints,
                             eval_every_steps=args.eval_every_steps, eval_every_epochs=args.eval_every_epochs,
-                            **diagnostic_overrides(args), **mechanism_overrides(args))
+                            **diagnostic_overrides(args), **dpco_overrides(args), **mechanism_overrides(args))
     if args.resume and not config.checkpoints.enabled:
         parser.error("Resume requires checkpoints enabled; --no-checkpoints runs cannot be resumed")
     paths = ResultsPaths.resolve(config.results.root_dir, base_dir=ROOT).experiment(args.run_name)
@@ -186,14 +192,14 @@ def main():
     with status.monitor():
         status.record("started")
         settings = configure_worker0(config.execution)
-        # This host lock prevents concurrent SGD/SAGE jobs from claiming the same
+        # This host lock prevents concurrent SGD/DPCO jobs from claiming the same
         # chips. It does not start, contact, or place work on worker1.
-        lock_path = Path(tempfile.gettempdir()) / f"sage-tpu-worker0-{os.getuid()}.lock"
+        lock_path = Path(tempfile.gettempdir()) / f"dpco-tpu-worker0-{os.getuid()}.lock"
         with lock_path.open("a") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise RuntimeError("Another SAGE TPU job is running on this host; run SGD and SAGE sequentially") from None
+                raise RuntimeError("Another DPCO TPU job is running on this host; run SGD and DPCO sequentially") from None
             devices = require_local_tpu(config.execution)
             print(json.dumps({"event": "tpu_ready", "devices": [str(d) for d in devices],
                               "local_process_only": True, "runtime_settings": settings}), flush=True)

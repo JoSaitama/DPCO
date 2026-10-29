@@ -1,5 +1,94 @@
 # Development record
 
+## 2026-10-28: continuous correct-reference SAGE-R
+
+- User authorized the current-batch correct-set mean-gradient reference. Added
+  CorrectSubsetReference and the sage_r suite alias (method=sage, reference=correct).
+  Reuse the unchanged full SAGE strict-negative flip, valid-B aggregation, JAX
+  VJP/JVP, model-state commit and parameter update. No historical sample buffer.
+  Empty correct sets use SGD; all-correct batches match SAGE-L.
+- Only continuous R is configured in this increment. Reject correct-reference
+  half/alternating/LOO and nonzero method warmup rather than silently expanding
+  the authorized variant. Existing E/L/SGD defaults and launch behavior remain.
+- Forward the alias through the shared ImageNet/iNaturalist/mechanism suite and
+  parent/child CLI, label directories sage_r and metadata/reference as correct.
+  Extend legacy and real-update observers with frozen_correct_ce; R mechanism
+  runs additionally enumerate correct-set bank moments. Old trajectories retain
+  their original observer computations. Reuse existing CSV schemas and fields.
+- Added focused CPU checks for exact selected means, padding, both prediction
+  classes being eligible for flips, original-B normalization, empty/all-correct
+  boundaries, dense/JVP/independent parity, real ResNet BatchNorm state, suite
+  dry-run forwarding, frozen-target pairing, bank moments and checkpoint recovery.
+  Local test packages live in an isolated /private/tmp environment; no server
+  environment or TPU task is modified. E/L plotting/synthetic theory scope stays.
+- Validation: all209 CPU/offline tests pass, including10 dedicated R checks and
+  existing E/L/SGD/policy/mesh regressions. The documented worker0 smoke command
+  resolves through configuration-only dry-run; no training child is launched.
+  Whitespace checks pass. Existing plotting changes remain uncommitted, and no
+  Git commit/push or remote operation is performed.
+
+## 2026-10-27: separate LR and SGD-prefix percentage comparisons
+
+- Added two default warmup figures: warmup10 compares LR .01/.05 while holding
+  the SGD prefix at10%; warmup_percent compares10%/30% at fixed LR .01. Each
+  includes original SGD at the matching LR. These are method prefixes, not
+  learning-rate warmups. Added --warmup-comparison-lr and --warmup-percents.
+- Keep method colors and clean1:.8 panel geometry. Percentage figures use pale
+  sparse dashes for10%, solid for30%, and solid blue for the single SGD baseline.
+  The legend, gallery and manifest distinguish percentage from LR line styles.
+  Default output now has eight figures; both warmup groups can be selected alone.
+- Inspected the two new completed LR.01 warmup30 exports; there are now36 runs
+  and180,000 train rows. A missing30% LR.05 curve is reported, never substituted.
+  Existing selection, smoothing, duplicate refusal and raw-file hash checks remain.
+- Ten focused offline tests pass, including separate comparison cohorts, missing
+  and duplicate handling, rendered percentage styles and recorded switch positions.
+  No training implementation, optimizer, source result, server or Git mutation.
+
+## 2026-10-27: compact plotting panels and clearer LR styling
+
+- User requested each panel's width:height=1:0.8, no explanatory image text,
+  thinner lines and easier solid/dashed LR discrimination. Added explicit
+  physical box aspect (default height/width .8), line width1.05, sparse (8,5)
+  dashes and 20% white mixing for dashed method colors. Blue/red/orange method
+  identities are unchanged. Style controls are exposed as CLI parameters.
+- Removed image titles, subtitles and footnotes, retaining only axes/ticks,
+  axis labels and legend. Protocol, smoothing and comparison caveats remain in
+  the HTML gallery and manifest. Removing semibold title usage also removes
+  the previous font fallback warning.
+- Preserved all source selection, LR checks, shared same-schedule y limits,
+  raw metrics, smoothing and update coordinates. A more square layout does not
+  prove early SAGE superiority; early-state inspection still uses an explicitly
+  reported --max-step prefix rather than altered data or selective smoothing.
+- Seven focused offline checks pass, including rendered physical aspect,
+  absence of figure titles/notes, line width/color and legend-label separation.
+  Full5k and early200 plots were regenerated for visual review. Training code,
+  source CSV/JSON files and server jobs are unchanged; no commit/push.
+
+## 2026-10-27: read-only CSV documentation and reproducible Mac plots
+
+- Added one standalone matplotlib script, `scripts/plot_training_results.py`,
+  and `docs/result_csv_guide.md`. It imports no JAX, methods, models or training
+  modules. Existing training/config/observation implementations are unchanged.
+- Inspected all 34 complete ImageNet100/ResNet50/seed5/B256/T5000 exports in the
+  supplied probe tree: 17 each at initial LR .01 and .05. Both rates have all
+  constant policy variants, both decays and E/L warmup10 runs. Seventeen observed
+  CSV filenames are distinguished from absent legacy theorem/window streams.
+- Six default CE/top-1 figure pairs separate continuous, half, alternating with
+  each first method, cosine and inverse_sqrt. Blue/red/orange identify SGD/E/L;
+  dashed/solid identify .01/.05. Fixed trailing50 means use growing prefixes;
+  raw mode is window1. Comparable same-schedule panels share y limits. No
+  seed averaging, confidence bands, best-run choice or synthesized missing data.
+- Effective metadata selects methods/rates rather than filename assumptions.
+  Duplicate cohorts fail closed; source status, contiguous steps, accuracy units,
+  sample counts, recorded LR schedules and policy phase sequences are checked.
+  Cross-revision comparisons are annotated, not treated as isolated LR effects.
+- Existing raw CSV/JSON files are hashed and rechecked unchanged. Run/CSV
+  inventories, an interval-labeled training summary, a plot manifest and a local
+  HTML gallery accompany figures. Six focused offline tests passed and all six
+  real-data figures were generated and visually reviewed. No training process,
+  server action, dataset/model download, commit or push was performed. A disposable /private/tmp
+  plotting environment supplies matplotlib without changing the training env.
+
 ## 2026-10-25: optional SGD-prefix method warmup
 
 - Added `method.sage_warmup_percent`, default 0, and shared

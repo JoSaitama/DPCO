@@ -37,10 +37,10 @@ SCHEMAS = {
         "cumulative_bound_rhs", "bound_slack", "bound_tolerance", "bound_pass", "train_duration_s",
         "diagnostic_duration_s", "elapsed_wall_s"),
     "theory_pairs": (*BASE, "source_id", "source_indices_json", "reference", "objective",
-        "selected_count", "flip_count", "probe_lr", "j_initial", "j_sgd", "j_sage",
+        "selected_count", "flip_count", "probe_lr", "j_initial", "j_sgd", "j_dpco",
         "difference", "objective_gain", "difference_over_lr", "first_order_residual",
         "reference_delta", "target_lambda", "mismatch", "identity_residual",
-        "transfer_residual", "norm_sgd_sq", "norm_sage_sq", "sample_energy",
+        "transfer_residual", "norm_sgd_sq", "norm_dpco_sq", "sample_energy",
         "energy_slack", "oracle_direction_error", "float32_tolerance", "finite"),
     "theory_moments": (*BASE, "reference", "estimator", "sample_count", "batch_size",
         "probability_sum", "statistic", "mean", "standard_error", "defined",
@@ -108,8 +108,8 @@ class LogisticSystem:
         self.task = ClassificationTask(linear_model, 2)
         self.full_batch = classification_batch(self.x, self.y)
         self.methods = {"sgd": create_method("sgd"),
-            "sage_e": create_method("sage", reference_name="error", gradient_backend="jvp"),
-            "sage_l": create_method("sage", reference_name="loss", gradient_backend="jvp")}
+            "dpco_e": create_method("dpco", reference_name="error", gradient_backend="jvp"),
+            "dpco_l": create_method("dpco", reference_name="loss", gradient_backend="jvp")}
         self.kernels = {name: jax.jit(lambda p, b, method=method:
             method.compute_direction(self.task, p, b).direction["theta"])
             for name, method in self.methods.items()}
@@ -132,7 +132,7 @@ class LogisticSystem:
 
     def directions(self, params, batch, reference):
         gd = np.asarray(self.kernels["sgd"](params, batch), np.float64)
-        gs = np.asarray(self.kernels["sage_e" if reference == "error" else "sage_l"](params, batch), np.float64)
+        gs = np.asarray(self.kernels["dpco_e" if reference == "error" else "dpco_l"](params, batch), np.float64)
         evaluation = self.evaluate(params, batch)
         valid = np.asarray(batch.valid_mask)
         errors = np.asarray(evaluation.feedback["error_mask"]) & valid
@@ -153,7 +153,7 @@ class LogisticSystem:
             reference_delta=delta, target_lambda=target, mismatch=mismatch,
             identity_residual=delta + 2 * float(scores[scores < 0].sum()) / len(grads),
             transfer_residual=target - delta + mismatch,
-            norm_sgd_sq=float(gd @ gd), norm_sage_sq=float(gs @ gs),
+            norm_sgd_sq=float(gd @ gd), norm_dpco_sq=float(gs @ gs),
             sample_energy=energy, energy_slack=energy - float(gs @ gs),
             flip_count=int(np.count_nonzero(scores < 0)), selected_count=int(selected.sum()),
             oracle_direction_error=float(max(np.linalg.norm(gd - oracle_gd), np.linalg.norm(gs - oracle_gs))))
@@ -180,7 +180,7 @@ def paired_rows(system, params, indices, reference, lrs, source_id):
             public = {k: v for k, v in info.items() if k not in ("gd", "gs", "reference", "selected", "h")}
             yield dict(source_id=source_id, source_indices_json=json.dumps(np.asarray(indices).tolist()),
                 reference=reference, objective=objective, probe_lr=eta, j_initial=initial,
-                j_sgd=jd, j_sage=js, difference=difference, objective_gain=gain,
+                j_sgd=jd, j_dpco=js, difference=difference, objective_gain=gain,
                 difference_over_lr=difference / eta if eta else None,
                 first_order_residual=difference / eta + gain if eta else None,
                 float32_tolerance=FLOAT32_ATOL,
@@ -200,7 +200,7 @@ def moment_rows(system, params, batches, reference, *, exact=False):
     batch = ClassificationBatch(jnp.asarray(system.x[batches]), jnp.asarray(system.y[batches]),
         jnp.ones(batches.shape, bool))
     gd = np.asarray(system.many["sgd"](params, batch), np.float64)
-    gs = np.asarray(system.many["sage_e" if reference == "error" else "sage_l"](params, batch), np.float64)
+    gs = np.asarray(system.many["dpco_e" if reference == "error" else "dpco_l"](params, batch), np.float64)
     _, gradients, errors = logistic_oracle(params["theta"], system.x, system.y)
     sample_grads = gradients[batches]
     masks = errors[batches] if reference == "error" else np.ones(batches.shape, bool)
@@ -211,15 +211,15 @@ def moment_rows(system, params, batches, reference, *, exact=False):
     dot = lambda a, z: np.sum(a * z, axis=-1)
     delta, target = dot(r, c), c @ h
     scores = np.sum(sample_grads * r[:, None, :], axis=-1)
-    values = {"h_dot_sage": gs @ h, "h_dot_sgd": gd @ h,
+    values = {"h_dot_dpco": gs @ h, "h_dot_sgd": gd @ h,
         "delta": delta, "lambda": target, "mismatch": dot(r - h, c),
-        "sage_norm_sq": dot(gs, gs), "sgd_norm_sq": dot(gd, gd),
+        "dpco_norm_sq": dot(gs, gs), "sgd_norm_sq": dot(gd, gd),
         "sample_energy": np.mean(dot(sample_grads, sample_grads), axis=1),
         "identity_residual": delta + 2 * np.minimum(scores, 0).sum(1) / b,
         "transfer_residual": target - delta + dot(r - h, c)}
     for i in range(len(h)):
         values[f"sgd_component_{i}"] = gd[:, i]
-        values[f"sage_component_{i}"] = gs[:, i]
+        values[f"dpco_component_{i}"] = gs[:, i]
         values[f"sgd_oracle_component_{i}"] = sample_grads[:, :, i].mean(1)
     norm_h = float(h @ h)
     values["alignment_ratio"] = gs @ h / norm_h if norm_h > RATIO_THRESHOLD else None
@@ -241,11 +241,11 @@ class QuadraticPairTask:
 
 
 def analytic_cases(mc_samples=2048):
-    """Return all checks and adverse outcomes without filtering SAGE losses."""
+    """Return all checks and adverse outcomes without filtering DPCO losses."""
     task = QuadraticPairTask()
     batch = (jnp.array([1., -1.]), jnp.array([True, True]))
-    method = create_method("sage", reference_name="loss", gradient_backend="jvp")
-    trainers = {"sage": Trainer(task, method, SGDUpdate(.1)),
+    method = create_method("dpco", reference_name="loss", gradient_backend="jvp")
+    trainers = {"dpco": Trainer(task, method, SGDUpdate(.1)),
                 "sgd": Trainer(task, create_method("sgd"), SGDUpdate(.1))}
     trajectories = {}
     for name, trainer in trainers.items():
@@ -256,14 +256,14 @@ def analytic_cases(mc_samples=2048):
             state, _ = step_fn(state, batch)
             trajectory.append(float(state.params["theta"][0]))
         trajectories[name] = trajectory
-    first = next((t for t in range(21) if abs(trajectories["sgd"][t]) < abs(trajectories["sage"][t])), None)
+    first = next((t for t in range(21) if abs(trajectories["sgd"][t]) < abs(trajectories["dpco"][t])), None)
     theta = .05
     d = method.compute_direction(task, {"theta": jnp.array([theta])}, batch).direction["theta"]
     observed_h = .5 * ((theta - .1 * float(d[0])) ** 2 - (theta * .9) ** 2)
     formula_h = -.1 * (theta - theta ** 2) + .1 ** 2 * (1 - theta ** 2) / 2
     zero = method.compute_direction(task, {"theta": jnp.array([0.])}, batch).direction["theta"]
     a_checks = dict(first_crossover_is_16=first == 16,
-        sage_cycle=bool(np.allclose(trajectories["sage"][:6], [.25,.15,.05,-.05,.05,-.05], atol=1e-6)),
+        dpco_cycle=bool(np.allclose(trajectories["dpco"][:6], [.25,.15,.05,-.05,.05,-.05], atol=1e-6)),
         sgd_closed_form=bool(np.allclose(trajectories["sgd"], .25 * .9 ** np.arange(21), atol=1e-6)),
         zero_no_flip=bool(np.allclose(zero, 0)),
         h_matches_formula=abs(observed_h - formula_h) < 1e-8,
@@ -283,7 +283,7 @@ def analytic_cases(mc_samples=2048):
     info = system.directions(params, system.full_batch, "error")
     oracle_gd, oracle_gs, r, scores = oracle_directions([1.], system.x, system.y, "error")
     initial = float(logistic_oracle([1.], system.x, system.y)[0].mean())
-    next_e, _ = Trainer(system.task, system.methods["sage_e"], SGDUpdate(.01)).step(
+    next_e, _ = Trainer(system.task, system.methods["dpco_e"], SGDUpdate(.01)).step(
         TrainState(params), system.full_batch)
     next_d, _ = Trainer(system.task, system.methods["sgd"], SGDUpdate(.01)).step(
         TrainState(params), system.full_batch)
@@ -326,7 +326,7 @@ def analytic_cases(mc_samples=2048):
               "Gd": float(oracle_gd[0]), "Gs": float(info["gs"][0]),
               "h_dot_Gs": float(info["h"] @ info["gs"]),
               "delta": info["reference_delta"], "lambda": info["target_lambda"],
-              "F_initial": initial, "F_sage": fe, "F_sgd": fd},
+              "F_initial": initial, "F_dpco": fe, "F_sgd": fd},
         "C": {"checks": checks, "dataset_x": tiny.x.tolist(), "dataset_y": tiny.y.tolist(),
               "theta": [1.], "ordered_batch_count": len(ordered), "ordered_batch_probability": 1/9,
               "mc_seed": 42, "mc_comparisons": mc_comparisons, "moments": conditional},
@@ -336,7 +336,7 @@ def analytic_cases(mc_samples=2048):
 @dataclass(frozen=True)
 class ExperimentSpec:
     seed: int = 5
-    method: str = "sage_l"
+    method: str = "dpco_l"
     schedule: str = "constant"
     lr: float = .05
     minimum: float = 0.
@@ -351,7 +351,7 @@ class ExperimentSpec:
 def run_experiment(system, spec, recorder):
     """All real transitions are Trainer.step; observer computations are read-only."""
     if spec.method not in system.methods or spec.schedule not in ("constant", "cosine", "inverse_sqrt"):
-        raise ValueError("Only original SGD/SAGE-E/L and constant/cosine/inverse_sqrt are supported")
+        raise ValueError("Only original SGD/DPCO-E/L and constant/cosine/inverse_sqrt are supported")
     if spec.steps < 1 or spec.batch_size < 1 or spec.probes < 0:
         raise ValueError("Positive training budget/batch size and nonnegative probes required")
     training = TrainingConfig(total_steps=spec.steps, learning_rate=spec.lr,

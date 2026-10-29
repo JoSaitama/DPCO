@@ -4,5 +4,5 @@ from launch_tpu import main
 
 
 if __name__ == "__main__":
-    main(default_mode="train", default_config="configs/tpu/imagenet100_resnet50_sage_e.toml",
+    main(default_mode="train", default_config="configs/tpu/imagenet100_resnet50_dpco_e.toml",
          default_wait=True)

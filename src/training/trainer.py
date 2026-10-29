@@ -33,7 +33,12 @@ class Trainer:
         import jax.numpy as jnp
         finite = jnp.all(jnp.array([jnp.all(jnp.isfinite(leaf))
                                    for leaf in jax.tree_util.tree_leaves(updated.params)]))
-        return next_state, {**result.metrics, "parameters_finite": finite}
+        metrics = {**result.metrics, "parameters_finite": finite}
+        if callable(getattr(self.method, "validate_state", None)) or callable(getattr(self.updater, "validate_state", None)):
+            # Static opt-in: do not add reductions to the existing SGD path.
+            metrics["state_finite"] = jnp.all(jnp.array([jnp.all(jnp.isfinite(leaf))
+                for leaf in jax.tree_util.tree_leaves((result.method_state, updated.optimizer_state))]))
+        return next_state, metrics
 
     def with_method(self, method):
         return Trainer(self.task, method, self.updater)

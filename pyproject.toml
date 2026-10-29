@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sage-research"
+name = "dpco-research"
 version = "0.1.0"
 description = "Modular sample-contribution optimization experiments in JAX."
 requires-python = ">=3.11"
@@ -11,12 +11,12 @@ dependencies = []
 
 [project.optional-dependencies]
 data = ["ijson>=3.3,<4"]
-test = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "Pillow>=11,<14", "filelock>=3", "ijson>=3.3,<4"]
-train = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "Pillow>=11,<14", "datasets>=3,<6", "huggingface_hub>=0.30,<2", "filelock>=3"]
+test = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "optax>=0.2.6,<0.3", "Pillow>=11,<14", "filelock>=3", "ijson>=3.3,<4"]
+train = ["jax>=0.6,<0.12", "flax>=0.10.4,<0.13", "optax>=0.2.6,<0.3", "Pillow>=11,<14", "datasets>=3,<6", "huggingface_hub>=0.30,<2", "filelock>=3"]
 tpu = ["jax[tpu]>=0.6,<0.12"]
 
 [project.scripts]
-sage-config = "src.cli:main"
+dpco-config = "src.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

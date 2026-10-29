@@ -60,7 +60,7 @@ class ClassificationProbes:
             stats = self._statistics[config.theorem3](params, batch, model_state)
             losses, valid, scores = stats.losses, stats.valid, stats.scores
             weights = jnp.where(valid, jnp.where((scores < 0) & stats.has_reference, -1., 1.), 0.)
-            gd, gs = stats.sgd, stats.sage
+            gd, gs = stats.sgd, stats.dpco
             correction = jax.tree_util.tree_map(lambda s, d: s - d, gs, gd)
             count = jnp.sum(valid)
             delta = tree_dot(stats.reference, correction)
@@ -75,14 +75,18 @@ class ClassificationProbes:
                     "reference_valid": stats.has_reference, "delta": delta,
                     "eta_delta": learning_rate * delta,
                     "reference_projection_sgd": tree_dot(stats.reference, gd),
-                    "reference_projection_sage": tree_dot(stats.reference, gs),
+                    "reference_projection_dpco": tree_dot(stats.reference, gs),
                     "delta_formula": delta_formula, "identity_residual": delta - delta_formula,
-                    "norm_sgd_sq": d2, "norm_sage_sq": s2}))
+                    "norm_sgd_sq": d2, "norm_dpco_sq": s2}))
             if config.theorem2:
                 errors = jax.lax.stop_gradient(valid & stats.errors)
                 objectives = [("full_batch_ce", valid, tree_dot(gd, correction))]
                 if self.reference_name == "error" and bool(jnp.any(errors)):
                     objectives.insert(0, ("frozen_error_ce", errors, delta))
+                if self.reference_name == "correct":
+                    correct = jax.lax.stop_gradient(valid & ~stats.errors)
+                    if bool(jnp.any(correct)):
+                        objectives.insert(0, ("frozen_correct_ce", correct, delta))
                 for objective_name, mask, objective_delta in objectives:
                     selected_count = jnp.sum(mask)
 
@@ -101,10 +105,10 @@ class ClassificationProbes:
                             "objective_mode": self.objective_mode, "batch_id": item.identity,
                             "reference_name": self.reference_name, "selected_count": selected_count,
                             "learning_rate": learning_rate, "lr_scale": scale, "probe_lr": eta,
-                            "j_initial": initial, "j_sgd": jd, "j_sage": js,
+                            "j_initial": initial, "j_sgd": jd, "j_dpco": js,
                             "difference": difference, "difference_over_lr": ratio,
                             "delta": objective_delta, "first_order_residual": ratio + objective_delta if eta > 0 else None,
-                            "norm_sgd_sq": d2, "norm_sage_sq": s2,
+                            "norm_sgd_sq": d2, "norm_dpco_sq": s2,
                             "finite": jnp.all(jnp.isfinite(jnp.array([initial, jd, js, objective_delta]))),
                             "strict_gain_eligible": (objective_delta > 0) & (eta > 0)}))
             if config.theorem3:
@@ -114,7 +118,7 @@ class ClassificationProbes:
                     "audit_gradient_norm_sq": tree_dot(audit_gradient, audit_gradient),
                     "delta": delta, "target_gain": target_gain,
                     "transfer_difference": target_gain - delta, "sample_energy": stats.sample_energy,
-                    "norm_sgd_sq": d2, "norm_sage_sq": s2, **cumulative}))
+                    "norm_sgd_sq": d2, "norm_dpco_sq": s2, **cumulative}))
         # One tree transfer per node; do not synchronize once per field.
         values = jax.device_get([row for _, row in rows])
         return [(stream, {key: np.asarray(value).item() if isinstance(value, (np.ndarray, np.generic)) else value

@@ -1,4 +1,4 @@
-"""Mathematical oracles and observational isolation, not a SAGE win condition."""
+"""Mathematical oracles and observational isolation, not a DPCO win condition."""
 
 from dataclasses import replace
 from itertools import product
@@ -47,14 +47,14 @@ class TheoryValidationTests(unittest.TestCase):
         self.assertEqual(info["flip_count"], 0)
         np.testing.assert_array_equal(info["gs"], info["gd"])
         # The vector gradient is orthogonal to a zero-feature sample: q=0 stays +1.
-        self.assertEqual(float(balanced.methods["sage_l"].weights(jnp.array([0.]), True, jnp.array([True]))[0]), 1.)
+        self.assertEqual(float(balanced.methods["dpco_l"].weights(jnp.array([0.]), True, jnp.array([True]))[0]), 1.)
 
     def test_empty_error_fallback_and_all_error_equals_loss(self):
         for labels, all_error in (([1, 0], False), ([0, 1], True)):
             system = LogisticSystem(np.array([[1.], [-1.]], np.float32), np.array(labels))
             params = {"theta": jnp.array([1.])}
             de = system.directions(params, system.full_batch, "error")
-            target = system.kernels["sage_l" if all_error else "sgd"](params, system.full_batch)
+            target = system.kernels["dpco_l" if all_error else "sgd"](params, system.full_batch)
             np.testing.assert_allclose(de["gs"], target, atol=1e-7)
             self.assertEqual(de["selected_count"], 2 if all_error else 0)
 
@@ -114,7 +114,7 @@ class TheoryValidationTests(unittest.TestCase):
     def test_probe_count_isolation_actual_schedules_and_cumulative_bound(self):
         x, y = synthetic_data(8, 2)
         system = LogisticSystem(x, y)
-        for method in ("sgd", "sage_e", "sage_l"):
+        for method in ("sgd", "dpco_e", "dpco_l"):
             for schedule in ("constant", "cosine"):
                 with self.subTest(method=method, schedule=schedule):
                     results = []
@@ -157,8 +157,8 @@ class TheoryValidationTests(unittest.TestCase):
         self.assertEqual(LEGACY_SCHEMAS, before)
 
     def test_shell_grid_and_invalid_cli_are_cpu_only(self):
-        env = {**os.environ, "SAGE_PYTHON": sys.executable, "JAX_PLATFORMS": "tpu"}
-        cmd = ["bash", str(ROOT / "run_sage_theory_suite.sh"), "--dry-run", "--seeds", "2", "5",
+        env = {**os.environ, "DPCO_PYTHON": sys.executable, "JAX_PLATFORMS": "tpu"}
+        cmd = ["bash", str(ROOT / "run_dpco_theory_suite.sh"), "--dry-run", "--seeds", "2", "5",
             "--lrs", ".01", ".05", "--schedules", "constant", "cosine"]
         plan = json.loads(subprocess.check_output(cmd, cwd=ROOT, env=env, text=True))
         self.assertEqual(plan["backend"], "cpu_only")
@@ -168,7 +168,7 @@ class TheoryValidationTests(unittest.TestCase):
 
     def test_failed_grid_member_is_retained_and_does_not_stop_later_lr(self):
         with TemporaryDirectory() as tmp:
-            result = subprocess.run([sys.executable, str(ROOT / "scripts/validate_sage_theory.py"),
+            result = subprocess.run([sys.executable, str(ROOT / "scripts/validate_dpco_theory.py"),
                 "--methods", "sgd", "--lrs", "1e300", ".01", "--steps", "1",
                 "--no-probes", "--case-mc-samples", "256", "--output", tmp],
                 cwd=ROOT, text=True, capture_output=True)

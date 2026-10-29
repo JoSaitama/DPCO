@@ -8,4 +8,7 @@ def create_reference(name):
     if name == "error":
         from src.references.error_subset import ErrorSubsetReference
         return ErrorSubsetReference()
+    if name == "correct":
+        from src.references.correct_subset import CorrectSubsetReference
+        return CorrectSubsetReference()
     raise ValueError(f"Unknown or unimplemented reference: {name}")

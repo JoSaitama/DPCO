@@ -3,6 +3,6 @@
 set -euo pipefail
 
 suite_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-exec "$suite_root/run_sage_suite.sh" \
+exec "$suite_root/run_dpco_suite.sh" \
   --config configs/tpu/inaturalist2021_resnet50.toml \
-  --methods sage_e sgd sage_l "$@"
+  --methods dpco_e sgd dpco_l "$@"

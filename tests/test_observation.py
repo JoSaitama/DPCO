@@ -62,7 +62,7 @@ class FixedSource:
 
 
 def fixture_config(root, *, probes=False):
-    original = load_config(ROOT / "configs/imagenet100_resnet50_sage_e.toml")
+    original = load_config(ROOT / "configs/imagenet100_resnet50_dpco_e.toml")
     return replace(original, results=ResultsConfig(str(root)),
         training=replace(original.training, total_steps=4),
         logging=LoggingConfig("steps", 2, 3, 3),
@@ -95,7 +95,7 @@ class ObservationTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             config = fixture_config(tmp)
             name = make_run_name(config, timestamp=datetime(2026, 10, 17, 14, 30, 25, tzinfo=timezone.utc))
-            self.assertEqual(name, "imagenet100_clean_resnet50_sage_e_42_0.01_20261017_143025")
+            self.assertEqual(name, "imagenet100_clean_resnet50_dpco_e_42_0.01_20261017_143025")
             paths = ResultsPaths.resolve(tmp, base_dir=ROOT).experiment(name)
             paths.create()
             with self.assertRaises(FileExistsError):

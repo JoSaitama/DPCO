@@ -8,10 +8,10 @@ image_size = 224
 mode = "clean"
 
 [model]
-name = "resnet101"
+name = "resnet50"
 
 [method]
-name = "sage"
+name = "dpco"
 
 [reference]
 name = "error"

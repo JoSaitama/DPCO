@@ -11,7 +11,7 @@ def configure_worker0(config, *, environ=None, hostname=None):
     hostname = socket.gethostname() if hostname is None else hostname
     if re.search(r"(?:-w-|worker)([1-9][0-9]*)$", hostname):
         raise RuntimeError("This launch protocol is restricted to worker0; do not start on worker1")
-    if env.get("SAGE_BACKGROUND_LAUNCH") != "1":
+    if env.get("DPCO_BACKGROUND_LAUNCH") != "1":
         raise RuntimeError("Use scripts/launch_tpu.py: TPU smoke/training must start through nohup")
     # Restrict libtpu to one process on this physical host. Never call
     # jax.distributed.initialize or discover peers from the original pod slice.

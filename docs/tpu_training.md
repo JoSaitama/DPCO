@@ -62,7 +62,7 @@ Foreground CPU sanity, without real data downloads:
 
 ```bash
 python scripts/sanity_check.py --config configs/tpu/imagenet100_resnet50_sgd.toml
-python scripts/sanity_check.py --config configs/tpu/imagenet100_resnet50_sage_e.toml
+python scripts/sanity_check.py --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 ```
 
 These synthetic checks are not ResNet/ImageNet/TPU results. Next launch SGD:
@@ -73,10 +73,10 @@ python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resne
 
 The launcher prints a PID and the exact `results/logs/{run_name}/stdout.log` path.
 Monitor that path with `tail -f`. Wait for the completed summary and successful updates
-before launching SAGE-E on the same host:
+before launching DPCO-E on the same host:
 
 ```bash
-python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_sage_e.toml
+python scripts/launch_tpu.py --mode smoke --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 ```
 
 For a single direct Python launch, no outer nohup is needed: it executes `nohup python -u ...`, with
@@ -95,9 +95,9 @@ See recording.md for exact columns, schema checks and failure limitations.
 For all new training suites, use the root shell entry under an outer nohup:
 
 ```bash
-nohup ./run_sage_suite.sh \
+nohup ./run_dpco_suite.sh \
   --mode smoke --dataset imagenet100 --model resnet50 \
-  --methods sage_e sage_l sgd --seeds 10 15 22 --data-mode clean \
+  --methods dpco_e dpco_l sgd --seeds 10 15 22 --data-mode clean \
   >/dev/null 2>&1 < /dev/null &
 ```
 
@@ -109,7 +109,7 @@ an abrupt child failure even if the child could not write its own end row. Host 
 can still prevent terminal recording. No worker1 job is started.
 
 Seeds default to 42 in shipped configs and may be overridden with --seed/--seeds.
-Methods are sage_e/sage_l/sgd; dataset/model overrides update both the parent and child
+Methods are dpco_e/dpco_l/sgd; dataset/model overrides update both the parent and child
 config, including the classifier class count. Only clean data is currently supported;
 mismatch modes fail before launch. Use --dry-run to inspect the full grid, and set the
 formal training budget explicitly rather than treating the 100-step pilot as final.
@@ -138,7 +138,7 @@ silently mixing a 160-pixel ImageNet-100 mirror with original-resolution data.
   source over the network. Parquet label filters can reduce transfers when row groups
   permit it; do not assume that network bytes equal the selected cache size.
 - Cache identity includes source revision, mapping hash and limits. Smoke and full
-  caches are different. By default they live in outer `Project_SAGE/data/`, not Git.
+  caches are different. By default they live in outer `Project_DPCO/data/`, not Git.
   Override `data.prepared_dir` to use a larger disk. The preparer checks estimated
   remaining space plus a 3 GB reserve before writing; full 1K requires much more than
   the previously reported 43 GB free disk. Interrupted preparation can resume from
@@ -151,7 +151,7 @@ silently mixing a 160-pixel ImageNet-100 mirror with original-resolution data.
 
 There is no synthetic fallback for failed HF access, no remote Python dataset script
 execution, and no download of pretrained model weights. The prepared data and model
-initialization are reused consistently between SGD and SAGE experiments.
+initialization are reused consistently between SGD and DPCO experiments.
 
 ## TPU topology and resource boundaries
 
@@ -173,14 +173,14 @@ the server run confirms those properties. The code never falls back to GPU/CPU.
 
 The main elapsed_wall_s clock starts at the experiment loop, after data preparation
 and random parameter initialization. This avoids comparing a first SGD download
-against a warm-cache SAGE run as though the difference were optimizer speed. Bootstrap
+against a warm-cache DPCO run as though the difference were optimizer speed. Bootstrap
 stdout/launch metadata precede that clock; do not label it as full provisioning time.
 
 The JVP backend computes exact full-parameter common-reference alignment through
 VJP/JVP, then freezes weights and averages the weighted gradient over original B.
 It does not normalize sample gradients or replace the reference by device-local means.
 Compared with the audit Jacobian, it avoids retaining a [B, parameter_count] training
-matrix. This is a memory representation change, not a different SAGE update rule.
+matrix. This is a memory representation change, not a different DPCO update rule.
 Current JVP mode supports full references; LOO remains in the separate audit backend.
 
 ## Validation and training modes
@@ -194,7 +194,7 @@ does not introduce edit warm-up or alternating SGD updates.
 For short T1-3 diagnostics after smoke succeeds:
 
 ```bash
-python scripts/launch_tpu.py --mode validate --steps 20 --config configs/tpu/imagenet100_resnet50_sage_e.toml
+python scripts/launch_tpu.py --mode validate --steps 20 --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 ```
 
 This prepares the complete selected dataset, enables the configured theorem probes,
@@ -213,7 +213,7 @@ realized training-batch objective and frozen error mask; the T3 fixed audit uses
 frozen BN buffers plus fixed training inputs. T3 target-transfer diagnostics are not an
 automatic proof of the original exact-reference convergence theorem. ReLU/BN semantics
 and all additional smoothness/target conditions remain part of interpreting a result.
-The validation mode is for full SAGE; a normal SGD baseline skips extra reference work.
+The validation mode is for full DPCO; a normal SGD baseline skips extra reference work.
 
 The reported HBM failure occurred during the initial step-0 probe, after complete
 validation but before the initial checkpoint save and first real update. Restart
@@ -225,7 +225,7 @@ Full-data pilot training, normally with probes disabled:
 
 ```bash
 python scripts/launch_tpu.py --mode train --config configs/tpu/imagenet100_resnet50_sgd.toml
-python scripts/launch_tpu.py --mode train --config configs/tpu/imagenet100_resnet50_sage_e.toml
+python scripts/launch_tpu.py --mode train --config configs/tpu/imagenet100_resnet50_dpco_e.toml
 ```
 
 Run these sequentially. The preset 100-step budget and LR=0.01 remain untuned pilot
@@ -238,7 +238,7 @@ Pass --lr 0.1 --lr-schedule cosine --min-lr 0 to decay from peak to zero, or rep
 zero with a positive floor. Constant is the default schedule; no implicit warmup
 or batch-size LR scaling occurs. With T>=2, update 0 uses peak and update T-1 uses
 floor. One-update runs use peak once; queries after the budget use floor.
-Pass `--l2-coefficient 0.0001` through `run_sage_suite.sh` to enable it for all suite
+Pass `--l2-coefficient 0.0001` through `run_dpco_suite.sh` to enable it for all suite
 jobs, or `--l2-coefficient 0` to force it off. Config files can use
 `[training] l2_coefficient = 0.0` (put the key inside the existing training table).
 Only parameter leaves with ndim > 1 receive lambda times parameter, after sample
@@ -252,9 +252,9 @@ Preserve an older run's batch explicitly if its preset has since changed to 256.
 Logging/evaluation/checkpoint controls and
 seven-slot retention follow recording.md. --steps and --batch-size are explicit
 overrides saved in the effective run configuration. Probes are off in the supplied
-smoke profiles; the configured global/per-theorem switches remain usable on SAGE.
+smoke profiles; the configured global/per-theorem switches remain usable on DPCO.
 
-Pass `--checkpoint-every-steps 10` through `run_sage_suite.sh` to replace the rolling
+Pass `--checkpoint-every-steps 10` through `run_dpco_suite.sh` to replace the rolling
 latest checkpoint every 10 completed updates. It defaults to 100 (or the custom
 config's latest_every_steps) and accepts positive integers only. Fixed milestones,
 best validation selection and mandatory initial/final saves keep their own rules.
@@ -273,7 +273,7 @@ save does not force validation. Keep the same evaluation settings on resume.
 To resume a run, reuse its original mode/config/overrides and add:
 
 ```bash
-python scripts/launch_tpu.py --mode train --config configs/tpu/imagenet100_resnet50_sage_e.toml --resume RUN_NAME --resume-slot latest
+python scripts/launch_tpu.py --mode train --config configs/tpu/imagenet100_resnet50_dpco_e.toml --resume RUN_NAME --resume-slot latest
 ```
 
 Existing run metadata/config must match. The new launch appends stdout and records

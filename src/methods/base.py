@@ -119,7 +119,7 @@ class AlignmentMethod:
                            theory_error_count=jnp.sum(valid & feedback.get("error_mask", jnp.zeros_like(valid))),
                            theory_reference_valid=reference.has_reference,
                            theory_reference_projection_sgd=jnp.sum(jnp.where(valid, scores, 0.)) / count,
-                           theory_reference_projection_sage=tree_dot(reference.direction, direction))
+                           theory_reference_projection_dpco=tree_dot(reference.direction, direction))
         return MethodResult(direction, next_model_state, method_state, metrics)
 
     def _directional(self, task, params, batch, model_state, method_state):
@@ -156,5 +156,5 @@ class AlignmentMethod:
                 theory_error_count=jnp.sum(valid & feedback.get("error_mask", jnp.zeros_like(valid))),
                 theory_reference_valid=selected_count > 0,
                 theory_reference_projection_sgd=jnp.sum(jnp.where(valid, scores, 0.)) / count,
-                theory_reference_projection_sage=tree_dot(reference, direction))
+                theory_reference_projection_dpco=tree_dot(reference, direction))
         return MethodResult(direction, next_state, method_state, metrics)

@@ -42,7 +42,7 @@ class AnalyticBatch(NamedTuple):
     errors: object
 
 
-def analytic_observer(*, reference="loss", trajectory="sage", config=None, audits=()):
+def analytic_observer(*, reference="loss", trajectory="dpco", config=None, audits=()):
     config = config or DiagnosticConfig(enabled=True, transfer=False)
     task = QuadraticTask()
     method = create_method(trajectory, reference_name=reference, gradient_backend="jvp")
@@ -73,17 +73,17 @@ class TrainingDiagnosticTests(unittest.TestCase):
                         state.params, batch, state.model_state)
                     oracle = dense_statistics(task, create_reference(reference), state.params,
                         batch, state.model_state, include_energy=False)
-                    runtime = TrainingDiagnostics(task, create_method("sage", reference_name=reference, gradient_backend="jvp"),
+                    runtime = TrainingDiagnostics(task, create_method("dpco", reference_name=reference, gradient_backend="jvp"),
                         DiagnosticConfig(enabled=True, transfer=False), reference_name=reference,
-                        trajectory_method="sage")._independent(state.params, batch, state.model_state)
-                    for name in ("reference", "scores", "sgd", "sage"):
+                        trajectory_method="dpco")._independent(state.params, batch, state.model_state)
+                    for name in ("reference", "scores", "sgd", "dpco"):
                         for result in (actual, runtime):
                             for a, b in zip(jax.tree_util.tree_leaves(getattr(result, name)),
                                             jax.tree_util.tree_leaves(getattr(oracle, name))):
                                 np.testing.assert_allclose(a, b, rtol=4e-5, atol=3e-6)
 
     def test_actual_update_and_single_state_commit_are_verified_for_both_methods(self):
-        for trajectory in ("sage", "sgd"):
+        for trajectory in ("dpco", "sgd"):
             observer, trainer, before, batch = analytic_observer(trajectory=trajectory)
             frozen = jax.tree_util.tree_map(np.array, before)
             after, _ = trainer.compile_step()(before, batch, jax.random.key(2))
@@ -109,7 +109,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
         self.assertEqual(update["model_state_max_abs_error"], 1.)
         pair = next(r for s, r in rows if s == "diagnostic_paired" and r["lr_scale"] == 1.)
         actual_loss = jnp.mean(trainer.task.evaluate(after.params, batch, before.model_state).losses)
-        self.assertAlmostEqual(pair["j_sage"], float(actual_loss), places=6)
+        self.assertAlmostEqual(pair["j_dpco"], float(actual_loss), places=6)
         self.assertTrue(pair["actual_update_in_pair"])
 
     def test_quadratic_pair_has_exact_known_finite_step_remainder_and_transfer_sign(self):
@@ -123,7 +123,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
         for stream, row in rows:
             if stream == "diagnostic_paired":
                 eta = row["probe_lr"]
-                expected = -eta * row["objective_gain"] + .5 * eta**2 * (row["norm_sage_sq"] - row["norm_sgd_sq"])
+                expected = -eta * row["objective_gain"] + .5 * eta**2 * (row["norm_dpco_sq"] - row["norm_sgd_sq"])
                 self.assertAlmostEqual(row["difference"], expected, places=6)
                 self.assertLess(row["difference"], 0)
             elif stream == "diagnostic_transfer":
@@ -138,7 +138,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
         batch = source.batches[0]
         observer = TrainingDiagnostics(trainer.task, trainer.method,
             DiagnosticConfig(enabled=True, transfer=False, lr_scales=(1.,)),
-            reference_name="error", trajectory_method="sage")
+            reference_name="error", trajectory_method="dpco")
         trainer = Trainer(trainer.task, trainer.method, SGDUpdate(2.))
         after, _ = trainer.compile_step()(before, batch, jax.random.key(2))
         rows = observe(observer, before, after, batch, eta=2.)
@@ -147,7 +147,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
         following = trainer.task.evaluate(after.params, batch)
         self.assertFalse(np.array_equal(previous, following.feedback["error_mask"]))
         expected = jnp.sum(jnp.where(previous, following.losses, 0.)) / jnp.sum(previous)
-        self.assertAlmostEqual(pair["j_sage"], float(expected), places=6)
+        self.assertAlmostEqual(pair["j_dpco"], float(expected), places=6)
 
     def test_empty_error_reference_and_zero_lr_are_explicit_and_finite(self):
         observer, trainer, before, batch = analytic_observer(reference="error")
@@ -204,7 +204,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
                 images.close()
 
     def test_runner_diagnostics_leave_trajectory_identical_and_resume_without_duplicate_rows(self):
-        for method in ("sage", "sgd"):
+        for method in ("dpco", "sgd"):
             with self.subTest(method=method), TemporaryDirectory() as tmp:
                 base = fixture_config(tmp)
                 base = replace(base, method=replace(base.method, name=method))
@@ -243,7 +243,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
         add_overrides(parser)
         args = parser.parse_args(["--diagnostics", "--diagnostic-steps", "0", "25", "100",
             "--no-diagnostic-transfer", "--diagnostic-audit-batches", "1", "--no-theorem-probes"])
-        c = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_sage_e.toml", mode="train",
+        c = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_dpco_e.toml", mode="train",
                            steps=200, **diagnostic_overrides(args))
         self.assertTrue(c.diagnostics.enabled)
         self.assertFalse(c.diagnostics.transfer)
@@ -259,29 +259,29 @@ class TrainingDiagnosticTests(unittest.TestCase):
     def test_shell_grid_forwards_all_switches_to_each_child(self):
         import argparse
         from src.training.launch import add_overrides
-        output = subprocess.check_output([str(ROOT / "run_sage_suite.sh"), "--dry-run",
-            "--mode", "train", "--methods", "sage_l", "sage_e", "sgd", "--seeds", "2", "5",
+        output = subprocess.check_output([str(ROOT / "run_dpco_suite.sh"), "--dry-run",
+            "--mode", "train", "--methods", "dpco_l", "dpco_e", "sgd", "--seeds", "2", "5",
             "--steps", "101", "--diagnostics", "--diagnostic-steps", "0", "25", "100", "150",
             "--no-diagnostic-transfer", "--diagnostic-update-check", "--diagnostic-paired-loss",
             "--diagnostic-lr-scales", "1", ".25", "--diagnostic-audit-seed", "17",
             "--diagnostic-audit-batches", "1", "--no-theorem-probes"],
-            cwd="/private/tmp", env={**os.environ, "SAGE_PYTHON": sys.executable}, text=True)
+            cwd="/private/tmp", env={**os.environ, "DPCO_PYTHON": sys.executable}, text=True)
         plans = json.loads(output)
         self.assertEqual(len(plans), 6)
         parser = argparse.ArgumentParser(allow_abbrev=False)
         add_overrides(parser)
         for plan in plans:
             flags, _ = parser.parse_known_args(plan["command"][4:])
-            resolved = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_sage_e.toml",
+            resolved = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_dpco_e.toml",
                 mode="train", steps=101, method=flags.method, **diagnostic_overrides(flags))
             self.assertEqual(json.loads(json.dumps(resolved.as_dict()["diagnostics"])), plan["diagnostics"])
             self.assertEqual(plan["active_diagnostic_state_steps"], [0, 25, 100])
             self.assertFalse(plan["probes_enabled"])
-        disabled = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_sage_e.toml", mode="train",
+        disabled = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_dpco_e.toml", mode="train",
             diagnostics=False, momentum=.9)
         self.assertFalse(disabled.diagnostics.enabled)
         # An explicit legacy override also permits diagnostics on an SGD trajectory.
-        self.assertFalse(resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_sage_e.toml",
+        self.assertFalse(resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_dpco_e.toml",
             mode="validate", method="sgd", diagnostics=True, theorem_probes=False).probes.enabled)
 
     def test_legacy_metadata_without_diagnostic_config_resumes_only_on_disabled_path(self):
@@ -308,7 +308,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
                 diagnostics=DiagnosticConfig(enabled=True, transfer=False, steps=(0, 1, 3), lr_scales=(1.,)))
             trainer, source, evaluation, initial, probes = fixture_components(config)
             observer = TrainingDiagnostics(trainer.task, trainer.method, config.diagnostics,
-                reference_name="error", trajectory_method="sage")
+                reference_name="error", trajectory_method="dpco")
             runner = ExperimentRunner(config, trainer, source, evaluation, base_dir=ROOT,
                 train_sample_count=5, metadata={}, probes=probes, diagnostics=observer,
                 run_name="both", console=False)
@@ -325,7 +325,7 @@ class TrainingDiagnosticTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             images = prepare(DataPlan("fixture", "a"*40, {0: 0, 1: 1}, "fixture", 8, 3),
                              Path(tmp) / "data", stream_factory=fake_stream)
-            config = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_sage_e.toml", mode="smoke",
+            config = resolve_config(ROOT / "configs/tpu/imagenet100_resnet50_dpco_e.toml", mode="smoke",
                 steps=2, batch_size=2, diagnostics=True, diagnostic_steps=[0, 1],
                 diagnostic_audit_batches=1, diagnostic_lr_scales=[1., .5])
             config = replace(config, data=replace(config.data, image_size=8),
