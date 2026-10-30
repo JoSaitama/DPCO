@@ -223,5 +223,6 @@ Adam, EMA Flip and EMA Filter run directories. It reads `train_steps.csv` and
 and adds a window-weighted ms/step figure. `--smooth-window` controls the shared
 trailing smoothing span; `--time-axis wall` includes training-loop overhead and
 `--time-axis active` accumulates training windows only. Figures and source hashes
-are saved under `results/files/plots/`. These train-label plots do not replace the
+are saved under `results/figures/`, alongside `files/`, `runs/` and `logs/`.
+Adam is blue, Flip red, and Filter orange (dashed). These train-label plots do not replace the
 fixed-group evaluation or official-test curves.

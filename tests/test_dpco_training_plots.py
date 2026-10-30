@@ -134,6 +134,8 @@ class DPCOTrainingPlotTests(unittest.TestCase):
             args += ["--smooth-window", "2", "--output-name", "comparison", "--dpi", "70"]
             with patch.object(plots, "ROOT", root):
                 output = plots.main(args)
+                self.assertEqual(output, root / "results/figures/comparison")
+                self.assertFalse((root / "results/files/plots").exists())
                 self.assertEqual(len(list(output.glob("*.png"))), 5)
                 self.assertEqual(len(list(output.glob("*.pdf"))), 5)
                 manifest = json.loads((output / "plot_manifest.json").read_text())
@@ -163,7 +165,7 @@ class DPCOTrainingPlotTests(unittest.TestCase):
                 ax = fig.axes[0]
                 box = ax.get_window_extent()
                 self.assertAlmostEqual(box.height / box.width, .8)
-                self.assertEqual([line.get_color() for line in ax.lines], ["#1f77b4", "#d62728", "#1f77b4"])
+                self.assertEqual([line.get_color() for line in ax.lines], ["#1f77b4", "#d62728", "#ff7f0e"])
                 self.assertEqual([line.get_linestyle() for line in ax.lines], ["-", "-", "--"])
                 self.assertAlmostEqual(ax.lines[0].get_xdata()[-1], 1.5 / 60)
                 self.assertAlmostEqual(ax.lines[0].get_ydata()[-1], 87.5)

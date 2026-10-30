@@ -380,3 +380,12 @@
 - **涉及文件：** 新增plots/plot_dpco_training.py、plots/README.md、tests/test_dpco_training_plots.py；pyproject.toml新增可选plot extra（matplotlib>=3.8,<4，不改变train/tpu依赖）；docs/cifar100n.md追加新绘图入口说明；追加本文件。提供服务器nohup命令将绘图依赖安装与绘图串行执行，外层日志和PID同样位于results/logs。
 - **验证结果：** 新增8项测试与旧绘图10项合计18项检查全部通过（0.633秒）。验证独立数值预期的样本加权平滑、因果前缀、不等长计时窗口加权及分钟/毫秒单位、编译事件不计active、忽略host派发戳、gap/overlap/缺失/非有限/时间倒退拒绝、accuracy单位和方法标签拒绝、设置与数据指纹不匹配说明、完整五图十文件实际渲染、PNG尺寸/PDF头、源CSV字节不变、输出防覆盖、绘图区.8比例/颜色线型及active坐标、无第三方依赖help。另在/private/tmp/dpco-plots-visual-qa-*用明确的合成fixture导出五张PNG/PDF，并查看CE-step、accuracy-time及ms/step三种代表布局，无文字裁剪/颜色或比例问题；这些QA图不是用户实验数据或算法效果证据。Python AST/TOML、README命令shell语法及git diff --check通过。
 - **证据边界与未完成：** 未取得用户服务器78000步的完整CSV，尚未生成真实长程实验图，不能用本轮fixture说明方法性能。训练CE/accuracy仍是观察噪声标签拟合，泛化与clean/corrupted曲线未在此入口新增；未新增time-to-target/阈值选择、跨seed置信区间或修改旧theorem probes。绘图参数不改变训练轨迹，无算法收敛或收益新结论。
+
+
+### 2026-10-30 / DPCO-0022：绘图输出改为results/figures并将Filter改为橙色
+
+- **用户授权依据：** 用户明确要求“把plot的输出结果放到result目录下，起名figures/ 与files等目录同目录级别。现在修改代码，并且把fliter变成橙色”。依据与既有files/runs/logs同级的要求，沿用实际项目根目录名results，目标为DPCO/results/figures，不另建单数result。
+- **目的与具体改动：** plots/plot_dpco_training.py将新绘图任务输出根目录从results/files/plots改为results/figures，保留原时间戳或--output-name子目录结构。五张图的PNG/PDF、派生曲线CSV与plot_manifest.json统一写该任务目录；CLI帮助与使用文档同步。Filter颜色改为橙色#ff7f0e，保留虚线，Adam蓝实线和Flip红实线保持。旧路径/旧配色记录作为历史保留，以本条和当前代码为准。
+- **涉及文件：** plots/plot_dpco_training.py、plots/README.md、docs/cifar100n.md、tests/test_dpco_training_plots.py及本文件。已有集成渲染检查更新为断言新目录与不再创建旧输出目录，颜色检查更新为橙色。没有修改训练源代码、计时/平滑公式、依赖或原始结果。
+- **验证结果：** 新/旧绘图合计18项检查全部通过（0.634秒），包含新目录下实际生成五张PNG/PDF、源CSV不变、防覆盖及三种颜色/线型。git diff --check通过；只进行了授权变更所需的本地验证，无新算法测试或正式训练。
+- **理论与证据边界：** 本次仅输出组织与视觉样式修改，无理论或实验性能新结论；渲染仍使用临时fixture，未读取服务器真实长程数据。已有results/files/plots产物保留，不自动搬移、覆盖或删除；用户同步脚本后使用原绘图命令即可生成到新位置。未连接服务器、提交或推送。

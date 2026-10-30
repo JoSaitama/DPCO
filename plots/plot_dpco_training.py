@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STYLES = {
     "adam": {"label": "Adam", "color": "#1f77b4", "linestyle": "-"},
     "flip": {"label": "DPCO Flip", "color": "#d62728", "linestyle": "-"},
-    "filter": {"label": "DPCO Filter", "color": "#1f77b4", "linestyle": "--"},
+    "filter": {"label": "DPCO Filter", "color": "#ff7f0e", "linestyle": "--"},
 }
 FIGURES = (
     ("train_ce_vs_step", "step", "ce", "Training step", "Train CE"),
@@ -240,14 +240,14 @@ def main(argv=None):
     parser.add_argument("--formats", nargs="+", choices=("png", "pdf"), default=["png", "pdf"])
     parser.add_argument("--dpi", type=int, default=220)
     parser.add_argument("--output-name", default=None,
-                        help="New directory name beneath results/files/plots; existing output is never overwritten")
+                        help="New directory name beneath results/figures; existing output is never overwritten")
     args = parser.parse_args(argv)
     if args.smooth_window < 1 or args.dpi < 1:
         parser.error("smooth-window and dpi must be positive")
     name = args.output_name or "dpco_training_" + datetime.now().astimezone().strftime("%Y%m%d_%H%M%S_%f")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in (".", ".."):
         parser.error("output-name must be one safe directory name")
-    output = ROOT / "results/files/plots" / name
+    output = ROOT / "results/figures" / name
     if output.exists():
         parser.error(f"Output already exists: {output}; choose a new --output-name")
     try:

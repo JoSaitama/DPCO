@@ -34,7 +34,7 @@ tail -n 30 "$log"
 
 ## 输出
 
-默认输出到 `results/files/plots/dpco_training_<时间戳>/`。可用 `--output-name experiment_a_w100` 指定该目录名；已有目录一律拒绝覆盖。更换平滑参数时使用新的输出名，原CSV、旧图片与历史结果均保留。
+默认输出到 `results/figures/dpco_training_<时间戳>/`，`figures/` 与 `files/`、`runs/`、`logs/` 同级。可用 `--output-name experiment_a_w100` 指定该目录名；已有目录一律拒绝覆盖。图片、派生曲线CSV和绘图清单均保存在该任务目录。更换平滑参数时使用新的输出名，原CSV、旧图片与历史结果均保留；此前生成在 `results/files/plots/` 的结果不会自动搬移。
 
 | 文件名（默认各保存PNG和PDF） | 横轴 | 纵轴 |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ tail -n 30 "$log"
 
 另外保存 `step_curves.csv`、`timing_curves.csv` 和最后写入的 `plot_manifest.json`，记录曲线数据、平滑参数、输入文件SHA256、脚本SHA256、方法颜色/线型、计时说明、加权平均ms/step和设置差异。仅在全部绘图和输入未变检查成功后生成manifest；没有manifest的输出目录可能是不完整任务。绘图前后输入文件改变会报错，请对完成的run或一致的文件快照绘图。
 
-所有图画布为宽5英寸、高4英寸，绘图区高/宽固定0.8。PNG默认220 DPI，可用 `--dpi` 修改；`--formats png` 可只输出PNG。Adam为蓝实线、Flip为红实线、Filter为蓝虚线。保留线性纵轴和原始异常值，不自动隐藏前期或裁剪高CE。
+所有图画布为宽5英寸、高4英寸，绘图区高/宽固定0.8。PNG默认220 DPI，可用 `--dpi` 修改；`--formats png` 可只输出PNG。Adam为蓝实线、Flip为红实线、Filter为橙色虚线（`#ff7f0e`）。保留线性纵轴和原始异常值，不自动隐藏前期或裁剪高CE。
 
 ## 平滑与时间定义
 
