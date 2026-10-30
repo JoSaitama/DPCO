@@ -67,9 +67,14 @@ class GroupedEvaluation:
 
 
 def cifar100n_evaluation(images, task, batch_size, batch_metrics=None):
+    return noisy_classification_evaluation(images, task, batch_size, 32,
+        "official_cifar100_test_eval_no_model_selection", batch_metrics)
+
+
+def noisy_classification_evaluation(images, task, batch_size, image_size, mode, batch_metrics=None):
     from src.data.images import evaluation_batches
-    primary = EvaluationSpec(task, lambda: evaluation_batches(images, batch_size, 32),
-        images.counts["validation"], "official_cifar100_test_eval_no_model_selection", batch_metrics)
+    primary = EvaluationSpec(task, lambda: evaluation_batches(images, batch_size, image_size),
+        images.counts["validation"], mode, batch_metrics)
     groups = []
     for name, partition, labels in (("clean", "clean", "original"),
             ("corrupted_noisy", "corrupted", "reference"),
@@ -77,7 +82,7 @@ def cifar100n_evaluation(images, task, batch_size, batch_metrics=None):
         ids = tuple(int(i) for i in images.group_indices[partition])
         view = images.label_view(labels)
         spec = EvaluationSpec(task,
-            lambda ids=ids, view=view: evaluation_batches(view, batch_size, 32, split="train", indices=ids),
+            lambda ids=ids, view=view: evaluation_batches(view, batch_size, image_size, split="train", indices=ids),
             len(ids), "fixed_train_eval_no_augmentation", batch_metrics) if ids else None
         groups.append((name, labels, spec))
     return GroupedEvaluation(primary, tuple(groups))

@@ -335,9 +335,17 @@ class CIFARIntegrationTests(unittest.TestCase):
                     store = CheckpointStore(Path(tmp)/"results/runs"/method)
                     final = store.load("final")["train_state"]
                     self.assertNotIn("best", store.index)
+                    # Pre-MNIST runs lack this new optional setting; recovery must
+                    # supply its implicit zero without rewriting historical metadata.
+                    metadata_path = Path(tmp)/"results/logs"/method/"metadata.json"
+                    legacy_metadata = json.loads(metadata_path.read_text())
+                    legacy_metadata["config"]["data"].pop("label_noise_percent")
+                    metadata_path.write_text(json.dumps(legacy_metadata))
+                    legacy_bytes = metadata_path.read_bytes()
                     args.resume, args.resume_slot = True, "p50"
                     run(args, c, jax.local_devices(), status=None)
                     final2 = CheckpointStore(store.directory).load("final")["train_state"]
+                    self.assertEqual(metadata_path.read_bytes(), legacy_bytes)
                 assert_tree(self, final, final2, exact=True)
                 rows = read_rows(Path(tmp)/"results/files"/method/"group_evaluation.csv")
                 self.assertEqual(len(rows), 9)
@@ -375,7 +383,7 @@ class CIFARIntegrationTests(unittest.TestCase):
         self.assertNotEqual(make_run_name(c), make_run_name(clean))
         self.assertNotEqual(make_run_name(c), make_run_name(synthetic))
         for kwargs in ({"noise_percent": 101.}, {"noise_percent": float("nan")}, {"noise_seed": 1},
-                       {"model": "resnet50"}, {"data_mode": "clean"}, {"theorem_probes": True}):
+                       {"model": "mnist_cnn"}, {"data_mode": "clean"}, {"theorem_probes": True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 resolve_config(PRESET, mode="train", **kwargs)
 

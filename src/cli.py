@@ -4,7 +4,7 @@ import argparse
 from dataclasses import replace
 import json
 
-from src.config import METHODS, REFERENCES, load_config
+from src.config import METHODS, MODELS, REFERENCES, load_config
 
 
 def main() -> None:
@@ -14,6 +14,7 @@ def main() -> None:
                         help="Validate/print configuration without starting training")
     parser.add_argument("--method", choices=METHODS)
     parser.add_argument("--reference", choices=REFERENCES)
+    parser.add_argument("--model", choices=MODELS)
     parser.add_argument("--flip-probability", type=float)
     parser.add_argument("--policy-mode", choices=("continuous", "alternating", "half"))
     parser.add_argument("--alternating-first", choices=("sgd", "dpco"))
@@ -25,13 +26,16 @@ def main() -> None:
     parser.add_argument("--adam-beta2", type=float)
     parser.add_argument("--adam-epsilon", type=float)
     from src.training.launch import cifar_overrides
-    parser.add_argument("--noise-type", choices=("clean100", "noisy100"))
+    parser.add_argument("--noise-type", choices=("clean100", "noisy100", "symmetric"))
     parser.add_argument("--is-human", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--noise-seed", type=int)
     parser.add_argument("--noise-percent", type=float)
+    parser.add_argument("--label-noise-percent", type=float)
     parser.add_argument("--download", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args()
     config = load_config(args.config)
+    if args.model is not None:
+        config = replace(config, model=replace(config.model, name=args.model))
     if args.method is not None:
         config = replace(config, method=replace(config.method, name=args.method))
         if args.method in ("adam", "sgd"):
@@ -59,10 +63,14 @@ def main() -> None:
                 if getattr(args, name) is not None}
     config = replace(config, training=replace(config.training, **training))
     noise = {key: value for key, value in cifar_overrides(args).items() if value is not None}
-    if args.noise_type is not None:
+    if args.noise_type is not None and config.data.name == "cifar100n":
         noise["mode"] = "clean" if args.noise_type == "clean100" else "noisy"
-    if args.noise_percent is None and any(v is not None for v in (args.noise_type, args.is_human, args.noise_seed)):
+    if config.data.name == "cifar100n" and args.noise_percent is None and any(v is not None for v in (args.noise_type, args.is_human, args.noise_seed)):
         noise["noise_percent"] = 0. if noise.get("noise_type", config.data.noise_type) == "clean100" else None
+    if config.data.name == "mnist" and args.label_noise_percent is not None:
+        noise["mode"] = "noisy" if args.label_noise_percent > 0 else "clean"
+        if args.noise_percent is None:
+            noise["noise_percent"] = None
     config = replace(config, data=replace(config.data, **noise))
     config.validate()
     print(json.dumps(config.as_dict(), indent=2))

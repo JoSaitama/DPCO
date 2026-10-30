@@ -6,6 +6,25 @@ batch/task, model adapter, contribution method, Adam updater, experiment runner,
 CSVs and complete checkpoints. The existing ImageNet/iNaturalist presets and
 updates remain unchanged.
 
+## Model selection
+
+Pass `--model NAME` to `scripts/run_suite.py` (or the existing shell entry):
+
+| Name | Architecture |
+| --- | --- |
+| `cifar_resnet18`, `cifar_resnet34` | Existing native32 3×3 stride1 stem, BasicBlocks; default remains34 |
+| `cifar_resnet50` | Native32 3×3 stride1 stem, reuses the existing ResNet50 Bottleneck implementation |
+| `resnet50`, `resnet101` | Directly reuse existing ImageNet-style 7×7 stride2/maxpool models, with a 100-class head |
+
+Model selection follows the explicit name rather than silently dispatching all
+CIFAR datasets to one backbone. `resnet50` and `cifar_resnet50` intentionally name
+different stems. Both accept native32 CIFAR inputs; preprocessing stays unchanged.
+The native50 blocks retain this project's existing bottleneck stride placement
+and zero-initialized last BN scale; this is not a claim of bitwise reproduction of
+the authors' PyTorch model. Changing model starts a new experiment; same-model
+Adam/Filter/Flip comparisons are needed. The current34 beta sweep needs no changes.
+For MNIST data/model/noise controls, see [MNIST](mnist.md).
+
 ## Official label semantics
 
 Sources:

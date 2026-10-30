@@ -10,7 +10,11 @@ from src.probes.mechanism_config import MechanismConfig
 
 METHODS = ("sgd", "adam", "dpco", "dpco_loo", "dtv", "dtv_loo", "random_flip", "dpco_policy")
 REFERENCES = ("loss", "error", "correct", "ema")
-DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000, "cifar100n": 100}
+DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000, "cifar100n": 100, "mnist": 10}
+IMAGENET_MODELS = ("resnet50", "resnet101")
+CIFAR_MODELS = ("cifar_resnet18", "cifar_resnet34", "cifar_resnet50")
+MNIST_MODELS = ("mnist_cnn", "mnist_mlp")
+MODELS = (*IMAGENET_MODELS, *CIFAR_MODELS, *MNIST_MODELS)
 INATURALIST_PREPARED_DIR = "../data/inaturalist2021_full_t140000_v20000_s42"
 
 
@@ -29,6 +33,8 @@ class DataConfig:
     noise_seed: int = 0
     noise_percent: float | None = None
     download: bool = False
+    # MNIST generator control; noise_percent remains an actual-rate assertion.
+    label_noise_percent: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -220,26 +226,43 @@ class RunConfig:
         if expected_noise is not None and (isinstance(expected_noise, bool)
                 or not math.isfinite(expected_noise) or not 0 <= expected_noise <= 100):
             raise ValueError("noise_percent must be finite and in [0, 100]; it checks the actual rate")
-        cifar_models = ("cifar_resnet18", "cifar_resnet34")
+        generated_noise = self.data.label_noise_percent
+        if (isinstance(generated_noise, bool) or not math.isfinite(generated_noise)
+                or not 0 <= generated_noise <= 100):
+            raise ValueError("label_noise_percent must be finite and in [0, 100]")
+        if self.data.name != "mnist" and generated_noise != 0:
+            raise ValueError("label_noise_percent is a MNIST-only generator control")
+        cifar_models = CIFAR_MODELS
         if self.data.name == "cifar100n":
             if self.data.noise_type not in ("clean100", "noisy100"):
                 raise ValueError("CIFAR-100N noise_type must be clean100 or noisy100")
             expected_mode = "clean" if self.data.noise_type == "clean100" else "noisy"
             if self.data.mode != expected_mode:
                 raise ValueError("CIFAR-100N data.mode must match noise_type")
-            if self.data.image_size != 32 or self.model.name not in cifar_models:
-                raise ValueError("CIFAR-100N requires image_size=32 and a cifar_resnet18/34 model")
+            if self.data.image_size != 32 or self.model.name not in (*cifar_models, *IMAGENET_MODELS):
+                raise ValueError("CIFAR-100N requires image_size=32 and a supported ResNet model")
             if self.data.is_human and self.data.noise_seed != 0:
                 raise ValueError("Human CIFAR-100N labels are fixed; noise_seed applies only to synthetic labels")
             if self.data.noise_type == "clean100" and expected_noise not in (None, 0):
                 raise ValueError("clean100 has 0 percent noise")
             if self.probes.enabled or self.diagnostics.enabled or self.mechanism.enabled:
                 raise ValueError("CIFAR-100N uses grouped evaluation; legacy observers must be off")
+        elif self.data.name == "mnist":
+            if self.data.noise_type != "symmetric" or self.data.is_human:
+                raise ValueError("MNIST uses synthetic symmetric labels; set noise_type=symmetric and is_human=false")
+            if self.data.mode != ("noisy" if generated_noise > 0 else "clean"):
+                raise ValueError("MNIST data.mode must match label_noise_percent (0=clean)")
+            if self.data.image_size != 28 or self.model.name not in MODELS:
+                raise ValueError("MNIST requires image_size=28 and a supported classification model")
+            if self.probes.enabled or self.diagnostics.enabled or self.mechanism.enabled:
+                raise ValueError("MNIST uses grouped evaluation; legacy observers must be off")
         elif (self.data.noise_type is not None or expected_noise is not None or not self.data.is_human
                 or self.data.noise_seed != 0 or self.data.download or self.model.name in cifar_models):
             raise ValueError("CIFAR noise controls/models require dataset=cifar100n")
-        if self.model.name not in ("resnet50", "resnet101", *cifar_models):
+        if self.model.name not in MODELS:
             raise ValueError(f"Unsupported model: {self.model.name}")
+        if self.model.name in MNIST_MODELS and self.data.name != "mnist":
+            raise ValueError("mnist_cnn/mnist_mlp require dataset=mnist")
         if self.model.initialization != "random":
             raise ValueError("The current optimizer comparison uses random initialization, not pretrained weights")
         if self.model.precision not in ("float32", "bfloat16"):

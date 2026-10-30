@@ -1,0 +1,66 @@
+# Exploratory mechanism preset, not the professor's unknown MNIST recipe.
+seed = 42
+global_batch_size = 128
+
+[data]
+name = "mnist"
+num_classes = 10
+image_size = 28
+mode = "noisy"
+prepared_dir = "../data/mnist"
+noise_type = "symmetric"
+is_human = false
+noise_seed = 0
+label_noise_percent = 20.0
+download = false
+
+[model]
+name = "mnist_cnn"
+initialization = "random"
+precision = "float32"
+
+[method]
+name = "dpco"
+negative_weight = -1.0
+
+[reference]
+name = "ema"
+beta = 0.99
+
+[training]
+optimizer = "adam"
+learning_rate = 0.001
+# 20 drop-last data traversals: floor(60000/128) * 20.
+total_steps = 9360
+lr_schedule = "cosine"
+min_learning_rate = 0.000001
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+adam_epsilon = 1e-8
+
+[execution]
+visible_chips = "0,1,2,3"
+chips_per_process_bounds = "2,2,1"
+port = 8476
+startup_timeout_s = 180
+gradient_backend = "jvp"
+
+[results]
+root_dir = "results"
+
+[logging]
+mode = "steps"
+interval = 50
+csv_flush_steps = 50
+timing_window_steps = 50
+
+[evaluation]
+mode = "steps"
+interval = 468
+
+[checkpoints]
+latest_every_steps = 2340
+at_epoch_end = false
+
+[probes]
+enabled = false

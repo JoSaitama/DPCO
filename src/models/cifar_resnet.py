@@ -34,6 +34,7 @@ class CifarResNet(nn.Module):
     num_classes: int = 100
     dtype: object = jnp.float32
     num_filters: int = 64
+    bottleneck: bool = False
 
     @nn.compact
     def __call__(self, images, train=True):
@@ -45,13 +46,21 @@ class CifarResNet(nn.Module):
         for stage, size in enumerate(self.stage_sizes):
             for block in range(size):
                 stride = 2 if stage > 0 and block == 0 else 1
-                x = BasicBlock(self.num_filters * 2**stage, stride, self.dtype,
-                               name=f"stage_{stage}_block_{block}")(x, train)
+                if self.bottleneck:
+                    # Reuse the existing ResNet50 residual block; only the stem differs.
+                    from src.models.resnet import Bottleneck
+                    x = Bottleneck(self.num_filters * 2**stage, (stride, stride), self.dtype,
+                                   name=f"stage_{stage}_block_{block}")(x, train)
+                else:
+                    x = BasicBlock(self.num_filters * 2**stage, stride, self.dtype,
+                                   name=f"stage_{stage}_block_{block}")(x, train)
         return nn.Dense(self.num_classes, dtype=self.dtype, name="head")(jnp.mean(x, axis=(1, 2)))
 
 
 def create_cifar_resnet(name, num_classes=100, precision="float32"):
-    stages = {"cifar_resnet18": (2, 2, 2, 2), "cifar_resnet34": (3, 4, 6, 3)}
+    stages = {"cifar_resnet18": (2, 2, 2, 2), "cifar_resnet34": (3, 4, 6, 3),
+              "cifar_resnet50": (3, 4, 6, 3)}
     if name not in stages:
         raise ValueError(f"Unknown CIFAR model: {name}")
-    return CifarResNet(stages[name], num_classes, {"float32": jnp.float32, "bfloat16": jnp.bfloat16}[precision])
+    return CifarResNet(stages[name], num_classes, {"float32": jnp.float32, "bfloat16": jnp.bfloat16}[precision],
+                       bottleneck=name == "cifar_resnet50")

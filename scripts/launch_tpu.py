@@ -164,6 +164,7 @@ def main(*, default_mode="smoke", default_config=None, default_wait=False):
             "noise_type": config.data.noise_type, "is_human": config.data.is_human,
             "noise_seed": config.data.noise_seed, "expected_noise_percent": config.data.noise_percent,
             "download_enabled": config.data.download,
+            "label_noise_percent": config.data.label_noise_percent,
             "dataset": config.data.name, "num_classes": config.data.num_classes,
             "model": config.model.name, "data_mode": config.data.mode,
             "data_dir": str(absolute_path(config.data.prepared_dir, ROOT).resolve()),

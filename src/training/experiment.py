@@ -105,7 +105,7 @@ class ExperimentRunner:
             stored_config["method"].setdefault("dpco_warmup_percent", 0.0)
             stored_config["method"].setdefault("negative_weight", -1.0)
             stored_config["reference"].setdefault("beta", 0.9)
-            for key in ("noise_type", "is_human", "noise_seed", "noise_percent", "download"):
+            for key in ("noise_type", "is_human", "noise_seed", "noise_percent", "download", "label_noise_percent"):
                 stored_config["data"].setdefault(key, getattr(DataConfig("imagenet100", 100), key))
             # Runs created before the opt-out switch always saved checkpoints.
             stored_config["checkpoints"].setdefault("enabled", True)

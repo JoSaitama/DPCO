@@ -8,6 +8,14 @@ def open_training_images(config, base_dir, *, limit=None, progress=None):
     if not directory.is_absolute():
         directory = Path(base_dir) / directory
     directory = directory.resolve()
+    if config.name == "mnist":
+        from src.data.mnist import MNISTImages
+        images = MNISTImages(directory, label_noise_percent=config.label_noise_percent,
+            noise_seed=config.noise_seed, noise_percent=config.noise_percent,
+            download=config.download, limit=limit, progress=progress)
+        if progress:
+            progress(event="data_ready", **images.identity)
+        return images, images.identity
     if config.name == "cifar100n":
         from src.data.cifar100n import CIFAR100NImages
         images = CIFAR100NImages(directory, noise_type=config.noise_type, is_human=config.is_human,

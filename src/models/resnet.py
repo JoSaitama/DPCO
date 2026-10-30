@@ -77,15 +77,15 @@ def create_resnet(name, num_classes, precision="float32"):
 
 def model_adapter(model, *, train):
     def apply(params, images, model_state):
-        variables = {"params": params, "batch_stats": model_state["batch_stats"]}
-        if train:
+        variables = {"params": params, **model_state}
+        if train and "batch_stats" in model_state:
             logits, changed = model.apply(variables, images, train=True, mutable=["batch_stats"])
             return logits, {"batch_stats": changed["batch_stats"]}
-        return model.apply(variables, images, train=False), model_state
+        return model.apply(variables, images, train=train), model_state
     return apply
 
 
-def initialize(model, seed, image_size):
+def initialize(model, seed, image_size, channels=3):
     variables = jax.jit(lambda key: model.init(key,
-        jnp.zeros((1, image_size, image_size, 3), jnp.float32), train=True))(jax.random.key(seed))
-    return variables["params"], {"batch_stats": variables["batch_stats"]}
+        jnp.zeros((1, image_size, image_size, channels), jnp.float32), train=True))(jax.random.key(seed))
+    return variables["params"], {key: value for key, value in variables.items() if key != "params"}

@@ -118,7 +118,7 @@ def evaluation_batches(images, batch_size, image_size, *, split="validation", in
     indices = list(range(images.counts[split])) if indices is None else list(indices)
     for start in range(0, len(indices), batch_size):
         ids = indices[start:start + batch_size]
-        pixels = np.zeros((batch_size, image_size, image_size, 3), np.float32)
+        pixels = np.zeros((batch_size, image_size, image_size, getattr(images, "channels", 3)), np.float32)
         labels, mask = np.zeros(batch_size, np.int32), np.zeros(batch_size, bool)
         for offset, index in enumerate(ids):
             image, label = images.get(split, index)

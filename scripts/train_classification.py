@@ -26,7 +26,8 @@ def run(args, config, devices, *, status):
     from src.data.images import ImageBatchSource, evaluation_batches
     from src.data.classification import open_training_images
     from src.methods import create_method
-    from src.models.resnet import create_resnet, initialize, model_adapter
+    from src.models.resnet import initialize, model_adapter
+    from src.models.classification import create_model, model_revision
     from src.probes.classification import ClassificationProbes, ProbeBatch
     from src.references import create_reference
     from src.tasks.classification import ClassificationTask
@@ -43,7 +44,7 @@ def run(args, config, devices, *, status):
         raise ValueError(f"Global batch size {batch_size} must be divisible by {len(devices)} local TPU devices")
     if config.execution.gradient_backend != "jvp":
         raise ValueError("TPU entry requires execution.gradient_backend='jvp' to avoid full training Jacobians")
-    if config.data.mode != "clean" and config.data.name != "cifar100n":
+    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist"):
         raise ValueError("Data mismatch modes are not implemented; a label must not silently leave data clean")
     limit = max(32, 2 * batch_size) if args.mode == "smoke" else None
     images, data_identity = open_training_images(config.data, ROOT, limit=limit,
@@ -51,14 +52,10 @@ def run(args, config, devices, *, status):
     try:
         mesh = local_mesh(devices)
         replicated = NamedSharding(mesh, P())
-        if config.data.name == "cifar100n":
-            from src.models.cifar_resnet import create_cifar_resnet
-            model = create_cifar_resnet(config.model.name, config.data.num_classes, config.model.precision)
-        else:
-            model = create_resnet(config.model.name, config.data.num_classes, config.model.precision)
+        model = create_model(config.model.name, config.data.num_classes, config.model.precision)
         print(json.dumps({"event": "model_initialize", "model": config.model.name,
                           "initialization": "random", "precision": config.model.precision}), flush=True)
-        params, model_state = initialize(model, config.seed, image_size)
+        params, model_state = initialize(model, config.seed, image_size, channels=getattr(images, "channels", 3))
         updater = make_updater(config.training)
         state = jax.device_put(TrainState(params, model_state,
             optimizer_state=updater.init(params)), replicated)
@@ -119,6 +116,10 @@ def run(args, config, devices, *, status):
         if config.data.name == "cifar100n":
             from src.training.evaluation import cifar100n_evaluation
             evaluation = cifar100n_evaluation(images, eval_task, batch_size, batch_metrics)
+        elif config.data.name == "mnist":
+            from src.training.evaluation import noisy_classification_evaluation
+            evaluation = noisy_classification_evaluation(images, eval_task, batch_size, image_size,
+                "official_mnist_test_eval_no_model_selection", batch_metrics)
         probes = None
         if config.probes.enabled:
             batches = []
@@ -143,9 +144,12 @@ def run(args, config, devices, *, status):
             "data_plan": data_identity, "data_fingerprint": images.fingerprint,
             "prepared_database": str(images.path), "split_counts": images.counts,
             "smoke_is_not_full_dataset_validation": args.mode == "smoke",
-            "normalization": "CIFAR100 mean/std; train zero-pad4/random-crop32/flip; eval native32" if config.data.name == "cifar100n" else "ImageNet mean/std; train random resized crop and horizontal flip; eval resize/center crop",
-            "evaluation_split": "official_test_monitor_only_no_best_selection" if config.data.name == "cifar100n" else "configured_validation",
-            "group_evaluation": "fixed reference-label clean/corrupted groups; truth metadata excluded from training batch" if config.data.name == "cifar100n" else None,
+            "normalization": ("MNIST uint8/255; native28 grayscale; no augmentation" if config.data.name == "mnist" else
+                "CIFAR100 mean/std; train zero-pad4/random-crop32/flip; eval native32" if config.data.name == "cifar100n" else
+                "ImageNet mean/std; train random resized crop and horizontal flip; eval resize/center crop"),
+            "input_channels": getattr(images, "channels", 3),
+            "evaluation_split": "official_test_monitor_only_no_best_selection" if config.data.name in ("cifar100n", "mnist") else "configured_validation",
+            "group_evaluation": "fixed reference-label clean/corrupted groups; truth metadata excluded from training batch" if config.data.name in ("cifar100n", "mnist") else None,
             "train_tail": "drop_last_to_exclude_padding_from_training_batchnorm",
             "evaluation_tail": "padded_with_valid_count_weighting",
             "optimizer": config.training.optimizer,
@@ -153,7 +157,7 @@ def run(args, config, devices, *, status):
             "reference_semantics": "bias-corrected EMA of raw global batch gradients, current batch included; independent of Adam moments" if config.reference.name == "ema" else config.reference.name,
             "sample_weight_semantics": "negative alignment gets method.negative_weight; zero/positive gets 1; original valid B denominator; stop-gradient weights" if config.reference.name == "ema" else "legacy method",
             "model": config.model.name, "model_initialization": "random",
-            "model_source_revision": "dpco_cifar_basicblock_v1" if config.data.name == "cifar100n" else "81b168d62f151feca9e8e7abc591df80168395b4",
+            "model_source_revision": model_revision(config.model.name),
             "parameter_count": sum(leaf.size for leaf in jax.tree_util.tree_leaves(params)),
             "gradient_backend": "exact_common_reference_vjp_jvp",
             "data_rng": "epoch shuffle and per-example stateless crop RNG; no prefetch",

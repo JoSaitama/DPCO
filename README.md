@@ -19,6 +19,15 @@ noise percentage is measured (40.2%), not an adjustable corruption generator.
 The existing ImageNet preset remains `configs/tpu/dpco/imagenet100_resnet50.toml`;
 synthetic noise injection into ImageNet is still separate planned work.
 
+[MNIST preparation and controlled experiments](docs/mnist.md) now use the same
+Adam/EMA/filter/flip flow, with native grayscale images and fixed synthetic labels.
+The default `configs/tpu/mnist/dpco_adam.toml` selects a small no-BN CNN and 20%
+corruption; `--label-noise-percent` controls this generator independently of the
+existing actual-rate assertion `--noise-percent`. Choose architecture explicitly
+with `--model`: CIFAR also accepts the existing `resnet50`/`resnet101` models or
+the native-stem `cifar_resnet50`, alongside 18/34. Model names retain distinct
+architectures rather than silently switching stems.
+
 [Opt-in TPU mechanism checks](docs/tpu_mechanisms.md) extend the real classification
 suite with both references, absolute LR candidates, a genuinely fixed train-mode
 bank, finite-bank moments and continuous-window accounting. They are off by
@@ -242,9 +251,11 @@ retain all its original settings. Resume permits just one seed/method.
 
 `--methods dpco_e dpco_l sgd` runs each method for each listed seed, in seed-major
 order. The method labels select dpco/error, dpco/loss, or unmodified SGD. Select
-`--dataset imagenet100|imagenet1k|inaturalist2021`, `--model resnet50|resnet101`, and `--data-mode clean`
-(`--datamode` is an alias). Mismatch modes are reserved and rejected before any job
-starts; a directory label never silently simulates noisy data. All grid configurations
+`--dataset imagenet100|imagenet1k|inaturalist2021|cifar100n|mnist` and `--model` from
+the supported model names (see dataset guides). ImageNet/iNaturalist require
+`--data-mode clean`; CIFAR/MNIST label modes follow their explicit noise controls
+(`--datamode` is an alias). Other mismatch modes remain reserved and rejected;
+a directory label never silently simulates noisy data. All grid configurations
 are validated before execution. Runs remain worker0-only and serial; failure stops
 the remaining suite. The coordinator waits for child exit and successful status,
 not just successful process creation. Individual jobs still use the nohup TPU launcher.
