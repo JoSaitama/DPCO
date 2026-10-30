@@ -214,3 +214,14 @@ smoke view; wrong data or label modes cannot silently resume an old trajectory.
 Resuming an older checkpoint rewinds the group CSV as well. Run labels distinguish
 human/synthetic, label mode and method weights. Legacy ImageNet metadata missing
 new optional data fields is compared with the original defaults.
+
+## Offline three-run plots
+
+Use [the DPCO plotting entry point](../plots/README.md) to explicitly select the
+Adam, EMA Flip and EMA Filter run directories. It reads `train_steps.csv` and
+`timing.csv` without a training runtime, exports CE/accuracy against step and time,
+and adds a window-weighted ms/step figure. `--smooth-window` controls the shared
+trailing smoothing span; `--time-axis wall` includes training-loop overhead and
+`--time-axis active` accumulates training windows only. Figures and source hashes
+are saved under `results/files/plots/`. These train-label plots do not replace the
+fixed-group evaluation or official-test curves.

@@ -322,3 +322,61 @@
 - **完整真实源验证：** 在 `/private/tmp/dpco-cifar-real` 实际取得169001437字节官方原图包并通过发布MD5，验证固定注释/映射SHA256，执行正式prepare生成50000训练/10000测试cache并完成全部50000项原标签匹配。网络慢的最初顺序下载由临时辅助Range读取补齐、拼接后整包MD5确认，停止重复慢下载后调用正式离线准备；该临时加速工具不是生产下载器支持并发/断点续传的声明。加载实测human 40.2%(C29900/N20100)、clean100实际0%但保留同组、synthetic seed0 40.216%(C29892/N20108)。真实标签与读入计量不等于方法性能实验；未用完整数据执行优化训练。
 - **涉及文件：** 新增 `src/data/{cifar100n,cifar100n_prepare}.py`、`src/models/cifar_resnet.py`、`scripts/prepare_cifar100n.py`、`configs/tpu/cifar100n/dpco_adam.toml`、`run_cifar100n_suite.sh`、`tests/test_cifar100n.py`、`docs/cifar100n.md`；修改 `src/{config,cli}.py`、`src/data/{classification,images}.py`、`src/training/{launch,evaluation,experiment,results}.py`、`scripts/{launch_tpu,train_classification}.py`、`tests/{local_mesh_check,test_updates}.py`、`pyproject.toml`、`README.md`、`docs/dpco_adam.md`，追加本文件。旧“尚未实现CIFAR/分组”记录保留为历史状态，当前说明以本条和新文档为准。
 - **理论与未完成边界：** C/N正确性相对原始benchmark标签定义，不认证语义绝对无歧义；合成噪声匹配类转移不能替代实例依赖的人类噪声。没有证明DPCO对clean目标或泛化必然改善，也不以错误标签CE升高单独判成功。尚未正式训练/调参、TPU硬件吞吐/内存测试、绘制新实验结果或统计每组实际训练flip率；没有增加通用ImageNet噪声注入、均匀可调人类噪声或修改历史数据。未提交/推送；服务器需同步代码并自行按文档准备数据后运行。
+
+
+### 2026-10-29 / DPCO-0017：服务器长任务统一 nohup 与中断下载恢复说明
+
+- **用户授权依据：** 用户明确要求“写入咱俩交流的协议，以后都是nohup启动”，并报告终端断开、询问下载一半能否续传。本次授权更新协议及记录；未将询问续传解释为修改下载器源代码的授权。
+- **目的与具体变动：** 在根目录与DPCO目录的AGENTS.md中约定，服务器下载、数据准备、依赖安装、训练及批量实验等长任务统一nohup后台启动，显式设置标准输入、独立日志、PID及查看方法，使用明确的项目Python路径；短时检查可前台运行。此约定不自动授权训练或扩大其他开发范围。
+- **下载行为核对：** 现有src/data/cifar100n_prepare.py的download_asset保留失败.partial，但再次请求使用partial.open("wb")，会重头写该文件，并非原生续传；完整且校验正确的源文件会复用。不能让用户直接重跑并称其为断点续传。终端断开后原任务是否退出、文件已下载多少，尚无服务器证据。
+- **恢复建议与边界：** 提供服务器端nohup包装的curl -C -手动续传方案，读取已有原图包.partial，持有同一.prepare.lock防止与旧准备进程并发写入；完整包先核对项目固定MD5再发布到正式文件名，随后交还现有prepare/verify入口完成其他源与缓存。续传依赖远端Range支持；若不支持则保留partial并报错，不声称必能续传。不改变生产下载器，也不绕过原有完整性检查。nohup仅针对终端挂断，不是机器重启或训练checkpoint恢复机制。
+- **涉及文件与验证：** 仅修改根AGENTS.md、DPCO/AGENTS.md并追加本文件；阅读现有下载器、准备入口与近期开发记录，核对curl官方-C选项说明 https://curl.se/docs/manpage.html#-C 。文档差异检查通过，无需运行算法测试。
+- **未完成项与证据限制：** 未连接服务器，未确认用户旧进程/partial实际状态、远端Range响应或完成续传；未改源代码、配置或依赖，未启动下载/训练、提交或推送。服务器上的协议文件需用户后续同步；本地规则现已生效。
+
+
+### 2026-10-29 / DPCO-0018：核对训练准备、results三目录与自动保存/probe边界
+
+- **用户要求与授权范围：** 用户询问是否可以训练，要求所有输出保存在results并按files/runs/logs分别存放检查文件、checkpoint和日志，提醒原SAGE有自动保存与probe。本次核对现有实现、记录输出约定并提供nohup启动命令；未把询问训练准备解释为远程启动正式训练或新增probe算法的授权。
+- **依据与当前状态：** 用户此前粘贴的服务器日志包含prepared及随后独立verified，50000训练/10000官方测试、human mismatch为20100即40.2%，并打印三组dry-run；这证明数据准备已完成，不证明TPU优化训练已通过。现有CIFAR preset仍为未调优100步pilot。
+- **目录核对与具体变动：** ResultsPaths已将相对results根目录锚定到DPCO根目录，RunRecorder将CSV写files/<run_name>，CheckpointStore写runs/<run_name>，launcher与recorder将stdout/train.log、完整配置/环境/启动信息写logs/<run_name>，跨运行状态写logs/run_status.tsv。无需修改源代码、配置或依赖。仅根及DPCO/AGENTS.md追加输出约定，且本文件追加；后续套件外层nohup日志和PID也放results/logs，不延续此前独立顶层logs写法。原始数据位置不作迁移。
+- **保存与恢复：** 默认checkpoint开启，固定initial/p25/p50/p75/final和滚动latest；checkpoint包含参数、BN、EMA reference、Adam矩、训练/data/RNG状态及CSV游标。latest会被后续保存替换，未被逻辑slot引用的旧快照按既有策略清理，并非保存每一步；恢复必须显式指定单个原run及一致配置，非自动重启。CIFAR不依据官方test选best。
+- **probe事实与边界：** 原theorem/diagnostics/mechanism代码仍保留，但配置验证明确禁止CIFAR100N或EMA/Adam路径启用旧observer。新路径已有每步train_steps、DPCO两组的dpco_steps（负alignment/干预数量、范数等）、evaluation与固定clean/corrupted_noisy/corrupted_original的group_evaluation，以及timing/summary。固定分组CE并不等于旧SAGE定理probe，更不等于按clean/corrupted分别统计负alignment的新增识别诊断；本轮未新增这些算法诊断，也无新理论结论。
+- **验证结果：** 本地以三组100步、checkpoint每25步、evaluation每25步的CLI dry-run通过，确认三组配置/子进程透传及results路径。定向运行tests.test_results、tests.test_checkpoint_controls、tests.test_cifar100n共23项CPU测试全部通过（6.603秒），涵盖结果命名/路径、自动保存控制和CIFAR分组/恢复等既有检查；文档diff检查通过。
+- **未完成项：** 没有连接服务器、启动真实数据优化或TPU实机测试；三组100步仅建议先验证流程，不能作为训练充分或算法有效的证据。正式预算与调参/统计重复尚未制定；未修改程序行为、提交或推送，既有未提交协议记录保留。
+
+
+### 2026-10-29 / DPCO-0019：核验三组TPU pilot日志并提出长程参数与敏感性方案
+
+- **授权依据与目的：** 用户提供三份100步训练日志，询问按近期CIFAR-100N的steps、lr、beta如何选择。本次为研究分析、参数建议与可复查命令，仅追加研究记录；没有修改源代码、配置、脚本或依赖，也没有连接服务器启动任务。
+- **用户实验事实：** 阅读附件0f55ef65-8186-4bbf-9ff9-c0e5b9019af1、abfdbcd3-af30-4de5-b3bf-b8ba7e950383、93cd41ec-9fe4-4137-a02f-ba03a3bbd976中的Pasted text.txt，分别为Flip、Filter、Adam。三者均4个本地TPU、同一数据manifest、seed42、初始化test CE=6.364174609375、batch128、lr=.001、100步12800样本，均以completed结束。最终官方test top1分别2.04%、3.68%、5.66%；test CE分别5.1727828125、5.617509765625、4.1575671875。此前“未实机验证”描述以此追加用户日志证据更新，但未独立检查服务器checkpoint文件/CSV。100步仅0.256样本曝光轮，不能推断充分训练后的优劣。
+- **稳定性观察：** 第25步test CE为Flip219.1931、Filter11.191984375、Adam10.71313671875，后续回落；Flip同节点clean原标签CE245.72566889632108。训练CE与eval CE使用不同BN口径，早期BN统计与快速变化参数不匹配是待排查可能，不能据日志确诊实现错误、宣称已发散，或保证降低lr一定修复。
+- **论文与原实现依据：** 数据作者固定版本main.py使用ResNet34、batch128、SGD(momentum.9、weight_decay.0005)、100epochs，alpha_plan为前60轮.1后40轮.01，实际覆盖传入lr：https://raw.githubusercontent.com/UCSC-REAL/cifar-10-100n/49df7d8a69e355470c77c1c2f2424916325a394b/main.py 。TMLR2025的Coreset-Driven Re-Labeling论文Table3使用CIFAR100N 300epochs、SGD .02/momentum.9/weight_decay.0005/B128，针对DivideMix/SOP+等重标注流程，不是DPCO+Adam配方：https://openreview.net/pdf?id=Tk78vb2Qd7 （正文页面触发验证，检索索引可读到Table3；作者及TMLR页面亦确认出版信息）。Adam原文默认lr.001、betas(.9,.999)、epsilon1e-8：https://arxiv.org/pdf/1412.6980 。因此不存在数据集统一规定的收敛steps或DPCO reference beta，不能把SGD lr.1/.02套给Adam。
+- **近期相关证据及边界：** 查阅2024TMLR的Exponential Moving Average of Weights in Deep Learning https://arxiv.org/html/2411.18704v1 ，其CIFAR100N/ResNet34实验为权重EMA，不能将论文alpha=.998或SGD大lr视为本项目梯度reference的验证。另核对2026-10-26论文Detecting noisy labels using checkpoint ensembles https://link.springer.com/article/10.1007/s00521-026-12575-1 ，说明其噪声识别与分类最优时间及scheduler关系依赖具体方法；不把其checkpoint检测/过滤的SGD设置宣称为在线DPCO共通定理。
+- **本轮建议（尚未执行、非论文最优值）：** 保持native ResNet34/官方human noisy100/同一增强与FP32/B128。第一轮三组统一200个drop-last数据遍历，即floor(50000/128)=390步/遍历、总78000步；100/300遍历对应39000/117000步，原样本曝光epoch_progress在78000步为199.68。建议共享lr峰值3e-4、cosine降至1e-6、Adam beta1=.9/beta2=.999/eps1e-8，沿用L2=0以保持当前机制实验口径；这不是最终调优或论文复现基线。3e-4是考虑早期CE冲高的保守试验起点，.001保留为预先列出的敏感性值，不能保证3e-4更好。reference beta主设.99，Filter0/Flip-1，两者与Adam共享其他设置；每390步完整固定分组/test评价，latest每1950步，其余固定milestone保存不变。
+- **beta解释与设计假设：** beta1/beta2控制编辑后方向的Adam moments，beta_ref控制原始batch梯度reference，独立设置。.9/.99/.999的名义衰减时间尺度1/(1-beta)约10/100/1000步，不是等权独立batch数；.99可减少当前batch在reference中的相对影响但引入历史滞后，尚无本项目性能证据。第一步无历史，偏差修正后r1=G1，增大beta无法改变这一点。后续先固定Adam betas，考察reference .9/.99/.999；lr候选1e-4/3e-4/1e-3，三组公平校准及报告，不能仅挑有利DPCO的设置。若增加正则对照，需三组一致，当前耦合kernel L2不等同AdamW。梯度编辑不是原始带噪CE的标准梯度下降，不能用该训练CE单调降低或固定步数单独定义DPCO收敛/成功。
+- **评价与后续选择：** 当前代码官方test被兼容命名为val，尚无独立留出validation；本轮固定配置只能作探索，不能反复按test曲线挑lr/beta后声称盲测优势。正式调参应先制定独立固定validation方案；原标签/污染真值不进入reference/权重，不用corrupted_original组当训练oracle。同设置先seed42，后报告42/43/44三种子配对结果及固定预算final，不能以错误标签CE单独升高视为成功。长程改总预算/调度需从共同初始化新建run，不能按当前严格恢复协议从100步pilot改配置续训。
+- **本地验证与未完成：** 用现有CLI对78000步、三组、B128、lr3e-4/cosine/min1e-6、beta_ref.99、Adam(.9,.999,1e-8)、L2=0、eval390/latest1950/seed42做dry-run，解析JSON逐组断言通过；不创建run、不导入训练运行时、不消耗TPU。文档diff检查通过。仅追加本文件；未改动其他未提交记录、启动正式训练、提交或推送。参数有效性、长程数值稳定性、独立validation与新reference识别诊断仍待验证。
+
+
+### 2026-10-30 / DPCO-0020：三组训练曲线与时间效率绘图方案讨论（未实现）
+
+- **用户请求与边界：** 用户拟在DPCO下新增plots目录，按明确指定的Adam/Flip/Filter三个results/files子目录读取train_steps.csv及timing.csv，画高宽比0.8:1的CE/accuracy折线，并询问timing是否结合CE；明确“先思考，先不改代码”。本轮只读取与讨论，按开发协议追加研究度量建议；没有创建plots目录或改动代码、配置、脚本、原始CSV。
+- **字段及现有代码核对：** train_steps含step/train_ce/train_top1/valid_batch_size/elapsed_wall_s；accuracy为0–1比例，图中转为百分数。timing含event/duration_s/window_steps/window_samples/steps_per_s/samples_per_s/elapsed_wall_s等。experiment.py在train_window窗口排空时device_get，窗口时长包含该窗口输入处理、训练派发和等待设备完成；每步train_steps.elapsed_wall_s是host派发时间戳，不等同每步设备完成时间。现有scripts/plot_training_results.py针对旧ImageNet/SGD族，不能直接声称兼容当前CIFAR/Adam三组。未检查服务器完整长程CSV，也未据本轮读取推断长程结果。
+- **主图建议（待用户确认实现）：** 两张step图：原始带噪标签普通train CE与100*train_top1；另建议对应的两张time图，横轴为训练循环累计wall-clock分钟，纵轴同前。每图独立三条曲线，纵横比按高/宽=.8解释；后续可固定axes box aspect=.8并另外固定画布，不能仅依靠数据坐标比例。按用户原文Adam蓝实线、Flip红实线、Filter蓝虚线；重复蓝色使用线型区分，不擅自将Filter改成绿色。可选统一后向平滑、保留淡色原始线并记录窗口，不能各方法单独平滑、隐藏前期异常或改原CSV。
+- **时间对齐和口径：** 时间主图优先使用timing中train_window的已完成窗口端点elapsed_wall_s，将其覆盖的(step-window_steps,step]内训练CE/accuracy按有效样本数聚合，避免将异步派发时间戳当逐步精确GPU/TPU耗时。窗口指标是区间均值，横轴为端点，需在图注说明。循环wall-clock包括循环内初始评价、JIT、周期评价/保存及训练开销，但不包括循环启动前的数据准备和模型初始化；不冒称全程序端到端时间。可选active训练时间为仅train_window.duration_s累计，排除独立记录的JIT、评价和checkpoint阶段，但仍包含输入与同步，并非纯kernel时间。不能将所有event时长混加当总耗时。
+- **辅助效率图：** 可选以窗口末step为横轴、1000*duration_s/window_steps(ms/step)为纵轴，或给出加权总平均1000*sum(duration_s)/sum(window_steps)；不对不同长度窗口的单步均值简单平均。不把duration_s本身误标为每步时长。保持三组相同设备、batch、数据和评价/保存设置，并如实报告是否计入编译和监测开销。
+- **方法依据与研究边界：** MLPerf Training以到达指定质量所需时间评价效率，来源 https://mlcommons.org/benchmarks/training/ 。优化器比较亦同时考察墙钟与性能/计算代价，参考 https://proceedings.mlr.press/v199/metz22a/metz22a.pdf 。本项目只读取这两个CSV时，时间-CE/acc图衡量的是带噪标签拟合效率；更低训练CE/更高带噪train accuracy不自动说明DPCO更好。正式泛化效率图应另读evaluation.csv的官方test指标，教授机制图应另读group_evaluation.csv；不在本轮私自扩展实现输入或按test阈值调参。只在预先指定的统一质量目标有意义时报告time-to-target，未达阈值记未达到，不能编造到达时间。
+- **拟定文件组织与验证：** plots作为后续绘图代码目录，图像及绘图参数/来源清单建议输出results/files/plots/<comparison_name>/，默认PNG/PDF，遵守既有results三目录规则；三个输入目录由参数显式指定，不自动选“最新”run。此为拟议接口而非已完成能力。检查本轮文档diff通过；无代码修改，不运行算法或绘图测试，未生成示意研究曲线、启动训练、提交或推送。
+
+
+### 2026-10-30 / DPCO-0021：实现显式三组CSV绘图、可调平滑与ms/step图
+
+- **用户授权依据：** 用户明确要求“可以，按照你的建议来修改代码”，平滑窗口由参数控制，并加入ms/step vs Step图。授权覆盖DPCO/plots离线绘图入口、必要绘图依赖、文档和本地验证；不改训练算法、CSV生产模式或既有实验数据。
+- **起始状态与保护：** 开始时只有DPCO_dev.md存在未提交的历史研究/协议追加记录，全部保留。没有创建新worktree、修改训练源文件或既有历史绘图器；没有连接服务器、启动训练、提交或推送。
+- **代码与接口：** 新增plots/plot_dpco_training.py及plots/README.md。用--adam-dir/--flip-dir/--filter-dir显式指定三个不同run目录，支持绝对路径、相对DPCO根路径或results/files下单个run名；不自动选择最新/最佳实验。只读train_steps.csv、timing.csv，存在对应logs元信息时额外校验方法/优化器/EMA负权重，报告配置与数据指纹差异；无元信息的CSV导出仍可画图但明确标签来源限制。训练runtime完全不导入，--help在无site-packages解释器下亦可用。
+- **图形与输出：** 默认生成train_ce_vs_step、train_accuracy_vs_step、train_ce_vs_time、train_accuracy_vs_time、ms_per_step_vs_step五张独立图，各PNG+PDF。Adam蓝实线、Flip红实线、Filter蓝虚线。画布5×4英寸、绘图区高/宽=.8，PNG220DPI（1100×880），不使用tight裁边改变导出高宽比；accuracy按100倍转为百分数，线性CE不丢弃早期异常值。输出到results/files/plots/<自动唯一时间戳或--output-name>/，已有目录拒绝覆盖；另存step_curves.csv、timing_curves.csv和最后写入的plot_manifest.json，保留输入/脚本SHA256、平滑参数、计时说明、设置差异、实际曲线和加权ms/step。失败目录无完成manifest，旧结果不自动清除。
+- **平滑定义：** --smooth-window默认100，正整数，1关闭额外平滑。Step图按最近W次更新的有效样本数加权，开头按已有前缀平均，保持因果性。时间及ms/step图以完整train_window为最小单位，从当前窗口往前累计到至少W步（开头不足则已有窗口）；不拆窗口、不对host派发时间作伪精确设备完成插值。W=1保留原始窗口均值。耗时用sum(duration)/sum(window_steps)，而非对不同长度窗口的ms/step简单平均。原始淡色线默认开启，--no-raw可关闭；输出CSV仍保留原始窗口/逐步值，实际平滑步数写入timing_curves.csv。
+- **计时与输入完整性：** --time-axis wall默认取已完成train_window端点elapsed_wall_s/60，包含此前循环内监测/编译/保存，排除循环前数据准备和模型初始化；窗口指标为区间平均，末点不是最终评价/保存之后的进程结束时间。active选项仅累计train_window duration，仍含输入与设备同步。ms/step图取1000*duration/window_steps。校验连续完整训练step、窗口无重叠无缺口且覆盖所有训练行、正窗口时长、时间一致/单调、数值有限和accuracy比例。只读输入前后哈希复核，文件变化时拒绝产生完成manifest；不把训练中两个文件异步刷盘的不一致快照自动修补。
+- **涉及文件：** 新增plots/plot_dpco_training.py、plots/README.md、tests/test_dpco_training_plots.py；pyproject.toml新增可选plot extra（matplotlib>=3.8,<4，不改变train/tpu依赖）；docs/cifar100n.md追加新绘图入口说明；追加本文件。提供服务器nohup命令将绘图依赖安装与绘图串行执行，外层日志和PID同样位于results/logs。
+- **验证结果：** 新增8项测试与旧绘图10项合计18项检查全部通过（0.633秒）。验证独立数值预期的样本加权平滑、因果前缀、不等长计时窗口加权及分钟/毫秒单位、编译事件不计active、忽略host派发戳、gap/overlap/缺失/非有限/时间倒退拒绝、accuracy单位和方法标签拒绝、设置与数据指纹不匹配说明、完整五图十文件实际渲染、PNG尺寸/PDF头、源CSV字节不变、输出防覆盖、绘图区.8比例/颜色线型及active坐标、无第三方依赖help。另在/private/tmp/dpco-plots-visual-qa-*用明确的合成fixture导出五张PNG/PDF，并查看CE-step、accuracy-time及ms/step三种代表布局，无文字裁剪/颜色或比例问题；这些QA图不是用户实验数据或算法效果证据。Python AST/TOML、README命令shell语法及git diff --check通过。
+- **证据边界与未完成：** 未取得用户服务器78000步的完整CSV，尚未生成真实长程实验图，不能用本轮fixture说明方法性能。训练CE/accuracy仍是观察噪声标签拟合，泛化与clean/corrupted曲线未在此入口新增；未新增time-to-target/阈值选择、跨seed置信区间或修改旧theorem probes。绘图参数不改变训练轨迹，无算法收敛或收益新结论。
