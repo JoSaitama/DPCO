@@ -469,3 +469,88 @@
 - **本地验证：** 定向运行test_model_selection、test_cifar100n、test_mnist、test_config、test_suite、test_classification、test_dpco_history、test_checkpoint_controls、test_optimizer_options、test_results，共82项CPU检查通过（33.377秒）。覆盖模拟四原始IDX文件完整60000/10000下载/解析、校验拒绝/缓存复用、固定噪声精确计数、单通道padding、固定分组CE独立NumPy核对、MNIST三组真实训练入口2步及checkpoint精确恢复；两种50完整模型eval_shape确认stem及2048维head，并用缩小Bottleneck骨干经真实入口训练/恢复。早期61项检查有1项沿用旧“CIFAR必须拒绝resnet50”断言失败，按新授权改成拒绝MNIST-only模型后，上述82项全部通过。
 - **额外兼容与并行验证：** 对CIFAR旧metadata人为移除新增字段后，三组从p50恢复的state逐项精确一致且metadata字节不变，定向检查通过（4.483秒）。与HEAD的旧实现比较缩小ResNet及CIFAR BasicBlock，初始化参数/BN、train logits及更新BN逐项精确相同。全部15份TOML通过配置校验；CIFAR34/既有50/native50及MNISTCNN/MLP/既有50各三组dry-run通过，子命令参数回传一致；MNIST source plan通过。另在四个模拟CPU设备执行灰度CNN/EMA/Flip/Adam真实入口2步，分组评价padding与checkpoint计数正确；不把CPU模拟称为TPU实机验证。git diff --check通过。
 - **文档、输出与未完成项：** docs/mnist.md提供绝对项目Python路径的nohup下载与串行三组训练命令、stdin=/dev/null、独立日志/PID和查看方式，说明新服务器需匹配execution拓扑；README与CIFAR文档说明两个50名称的结构区别。所有本地训练/下载检查均在临时fixture目录，未下载真实MNIST、启动正式服务器训练、改写原始Results、提交或推送。完整真实数据准备、TPU实机执行、长程收敛与方法优劣尚待用户验证；当前CIFAR beta消融不改模型或配置，不因本功能接入自动切换到50。
+
+
+### 2026-10-30 / DPCO-0030：制定MNIST三方法配对机制验证参数与启动命令
+
+- **用户请求与授权范围：** 用户要求给出一组合理MNIST参数，检验能否出现教授描述的DPCO效果。本轮读取两级协议、最近记录、MNIST预设/实现/文档和launcher，提供实验方案与nohup命令；仅追加本研究记录，不修改源代码、预设配置或启动服务器任务。
+- **外部依据与边界：** 核对Adam原论文Algorithm1（https://arxiv.org/pdf/1412.6980）给出的通用起点alpha=.001、beta1=.9、beta2=.999、epsilon1e-8；核对Keras官方MNIST CNN示例（https://keras.io/examples/vision/mnist_convnet/）采用原生28×28×1、uint8/255、Adam/B128及15轮干净训练。Keras示例网络大小、dropout、validation划分与本项目不同，不能转用其99%性能或15轮结论作为本项目带噪DPCO保证。教授完整模型/噪声/超参数未知，本次是其选择性学习现象的机制验证，不称严格配方复现。
+- **预先固定的首轮方案：** 使用用户已选择的mnist_cnn无BN/dropout模型、60000训练/10000官方test、20%精确固定对称错标（12000条，其余48000），noise_seed=0独立于训练seed。三方法adam/dpco_filter/dpco_flip，贡献权重分别全部保留/负align0/负align−1；三个训练seed42/43/44，共九个串行run，各seed的方法共享初始参数/数据顺序/污染图。B128，50个drop-last遍历=468×50=23400步，Adam(.9,.999,1e-8)、峰值lr.001/cosine至1e-6、L2=0、eval每468步、checkpoint每2340步并开启保存。50轮是为同时观察初期学习与后期错标记忆的预设探索预算，不是论文规定或保证充分收敛。不按test峰值早停选模型。
+- **reference选择说明：** 本轮命令显式覆盖预设beta_ref=.99为.9，采用名义约10步的较短历史作首轮起点，以减少历史滞后的可能影响；这是设计判断而非MNIST性能证据或教授指定值。Adam beta1亦为.9，但reference与Adam moments仍为独立状态；不因此把两者合并。仅一个beta下的结果不能断言DPCO在所有历史设置中成功或失败；后续敏感性另行预先设计，不反复按官方test调参。
+- **评价判据：** 优先查看group_evaluation.csv中固定clean原标签CE下降且学习未被明显牺牲；corrupted_noisy对错误标签CE较普通Adam维持较高、错误记忆较少；同时corrupted_original对原标签的CE/accuracy表现更好或保留有效学习，以区分选择性抑噪与整体欠拟合。官方test CE/top1为辅助泛化结果，报告固定最终预算和完整曲线，三训练seed做配对均值/波动；不能只凭整体train CE高或corrupted_noisy高判成功，也不要求clean训练CE必须低于已近零的过拟合Adam才承认选择性现象。固定noise_seed0的重复只覆盖该污染图下的初始化/顺序波动，不覆盖不同污染实现的方差；单组不出现现象不反驳教授其他条件下的报告。
+- **启动与输出：** 提供绝对服务器Python /home/jason_chia925_gmail_com/Project_DPCO/.venv/bin/python，配置configs/tpu/mnist/dpco_adam.toml，显式模型/生成比例/实际20%断言/noise_seed与训练参数；--download在首次运行准备和校验缓存，后续复用。外层nohup、stdin=/dev/null、stdout/stderr到results/logs独立套件日志、后台&、保存PID并提供查看命令；run_suite --wait串行九任务并保留每run files/runs/logs与子进程日志。三方法套件不共用--negative-weight -1选项，以免与filter的0别名冲突。假定沿用现有四本地TPU拓扑，异机路径/拓扑需匹配实际环境，不隐式GPU/CPU回退。
+- **验证与未完成项：** 本地完整CLI加--dry-run解析九份plan，逐一断言seed顺序、方法负权重None/0/−1、DPCO beta .9、CNN、23400步/B128、Adam/lr、20%生成与断言、noise_seed0、download、eval468、checkpoint2340及关键child参数透传，全部通过；核算floor(60000/128)=468及23400/468=50。文档diff检查通过。没有下载真实数据、运行模型测试或正式训练、改变预设、提交或推送；有效性结论待用户实际实验。
+
+
+### 2026-10-30 / DPCO-0031：澄清accuracy最终目标与CE代理/贡献目标，调整MNIST评价优先级
+
+- **用户请求与范围：** 用户指出不能只比较loss，认为本身优化目标是acc。本轮核对两级协议、最近记录、组会转写05:17–11:42及当前任务/EMA/评价源码，作概念澄清并记录研究评价优先级；未获得新代码修改授权，仅追加本文件，不改算法、命令或正在运行的任务。
+- **会议与实现事实：** 组会09:42–10:48强调loss低未必效果好；10:48–11:17明确指出accuracy不可直接作为通常的可微目标，需要surrogate。当前tasks/classification.py计算逐样本CE及预测错误/accuracy统计；methods/dpco_history.py的g_i来自CE梯度，r是raw CE batch-gradient EMA，评分r^Tg_i决定权重；更新仍是编辑后梯度交Adam，未对accuracy求梯度。给定r的独立贡献子问题可写为max_{w_i∈[-1,1]} r^T(Σw_i g_i/B)，它不等于max accuracy，也没有保证多步test accuracy单调提高。0–1 top1在预测类别不变区域对参数局部为常数、通常梯度为0，在决策切换处可不连续/不可微，不能把现有CE梯度叫accuracy梯度。
+- **解释与研究边界：** 最终任务追求更准确分类，可以把accuracy视为任务层面的优化目标；代码层面的可微代理、给定reference的贡献优化和最终评价指标必须区分。CE下降与accuracy提高不等价，正确类别置信度变化而argmax不变时CE可变、accuracy不变。DPCO也不保证是某个固定普通CE的标准下降法。各方法不同signed/加权训练目标值不宜直接排序，但同一固定数据/标签上的普通CE仍是可比的概率预测质量度量，无需丢弃。此前CIFAR Flip较低test CE伴随明显较差top1说明二者不能互代，不能据低CE宣称分类性能成功。
+- **追加调整DPCO-0030评价表述：** 其“官方test CE/top1为辅助”作为整体算法优劣排序过弱，按用户强调的任务目的修正为：固定最终预算下干净官方test top1及三训练seed配对结果是总体分类效果主指标；不按test峰值选checkpoint或据test调参。教授controlled verification仍需分组机制证据：clean原标签accuracy保持良好，corrupted_original accuracy/CE说明是否保留真实类别学习，corrupted_noisy accuracy/CE说明错误标签记忆；低噪声标签accuracy本身也可能来自整体欠拟合，必须联合clean与test判断。train观察标签accuracy越高未必越好，因为含12000个错标签。只复现选择性现象与证明总体泛化优于Adam为不同结论，需分别报告。
+- **现有输出与验证：** evaluation.csv已含val_top1（当前为官方test）、val_ce；group_evaluation.csv已含各组top1/ce；train_steps.csv已有train_top1。无需改动上一轮MNIST启动命令或新增记录功能，即可按上述优先级分析。静态核对字段与源码一致，文档diff检查通过；没有运行新测试/训练、提出新的性能保证、提交或推送。原标签仍仅用于观察，不进入训练reference或权重。
+
+
+### 2026-10-30 / DPCO-0032：核实教授MNIST口头报告与flip的证据层级
+
+- **用户请求与范围：** 用户要求再次回看组会，概括教授已做的MNIST结果、是否使用flip。本轮重读两级协议、近期记录及两份组会MD的相关段落，仅追加核对记录，不修改代码/配置、实验命令或原会议文件，不启动训练。
+- **明确记录：** 转写31:27–31:44（第147行）对“reference借鉴Adam确定后，闭式解还是flip，所以保持flip去做？”明确回答“对”；这证明教授认可后续方法保留flip。32:30–33:26（第155/159行）提出controlled verification希望clean loss低、corrupted loss高；33:40–33:52（第163行）说“这些实验我已经做完了……在MNIST上已经跑完了”，确认其MNIST简化实验已经做过。33:52–34:21（第165/167行）讨论SGD交替flip与建议先Adam，34:35–35:10（第171/173行）布置discard/flip和不同signal对照。
+- **上下文推断与限制：** 围绕flip及clean/corrupted受控行为讨论后报告MNIST完成，可合理推断其小实验与该贡献干预方向相关，flip很可能是其中操作；但“已完成MNIST实验”的一句话没有逐项列出本人实际使用的reference、flip频率、optimizer或baseline，不能将上下文推断升级为完整配方事实。尤其不能断言已验证的就是当前raw含当前batch EMA+每step整梯度Flip+Adam，或宣称已证明该组合在accuracy上优于Adam。记录也没有明确逐指标公布其MNIST成功程度、数值或曲线；“clean低、corrupted高”首先是明确实验要求，其已完成相应现象验证的理解来自语境。
+- **未知结果与避免混淆：** MNIST具体模型、噪声类型/比例、beta、lr、训练轮数、clean/corrupted loss标签口径、实际accuracy及相对Adam提升幅度均未记录。建议先Adam不等于其本人已完成的全部MNIST实验必用Adam；后续引入历史signal不等于本人此前MNIST必用该历史版本。本文此前“小规模正面验证”的说法应按此口头报告和上下文推断理解，不能作为已经取得原始数值结果的表述。两份MD是同次会议的转写与整理，不算两次独立实验佐证。
+- **验证结果及未完成项：** 已逐项核对原转写时间戳与总结中的来源注记，最终回答明确区分记录/推断/未记录；git diff --check通过。仅本文件追加，无代码修改、模型测试、训练、提交或推送；教授实际运行配方和结果仍需原始代码/图表或进一步信息才能确认。
+
+
+### 2026-10-30 / DPCO-0033：读取MNIST九组CSV，分析train accuracy与选择性抑噪
+
+- **用户请求与范围：** 用户导入Results/Minist结果，要求先读数据分析，更多关注train acc，初步认为Flip未达到教授预期，之后自行画图。本轮只读分析及生成研究报告/派生JSON，不修改训练/绘图源代码、配置或原始CSV，不启动训练。读取两级协议与近期记录，应用Spreadsheets技能的只读/科学数据分析规范，原始记录保留；初次外层git status失败后在DPCO内核对状态，已有本文件未提交记录完整保留。
+- **输入完整性：** 目录只有51份CSV，无metadata/log/checkpoint或原标签缓存。九组为Adam/Filter/Flip×seed42/43/44，均summary completed，23400连续更新、2995200样本出现；合计210600行train_steps、459行evaluation、1377行固定分组、140400行dpco_steps。每步B128，lr逐项符合cosine.001→1e-6，51个评价节点为0至23400每468步，50个drop-last数据遍历；clean48000、corrupted12000、test10000。实际负权重日志0/−1、EMA计数随step正确；同seed三组的初始test及分组指标完全一致。目录标记CNN/20%对称污染/noise_seed0/beta_ref.9与命令一致，但不能仅由命名认证模型、代码版本、完整优化器设置、噪声指纹或硬件；无完整配置元信息的限制已明确记录。
+- **最终accuracy（3训练seed均值）：** 末468步有效样本加权online观察标签train acc为Adam83.3561%、Filter80.2311%、Flip78.6425%。23400步冻结模型全训练集观察标签acc为83.3644%/80.2372%/78.6494%；clean原标签acc99.2611%/99.4340%/98.2139%；corrupted错误标签acc19.7778%/3.4500%/.3917%；corrupted原标签acc75.5139%/94.5361%/97.7889%；全训练集原标签acc94.5117%/98.4544%/98.1289%。固定最终test为93.3533±1.1705%、97.7333±.0643%、98.1267±.1401%（±样本标准差ddof=1，不是CI）。当前Flip相对Adam总体原标签训练和test均改善，不能概括为方法完全未产生预期抗噪效果；clean及全原标签训练acc的最优方法并非Flip。
+- **train acc精确分解：** 对同一冻结模型，观察标签acc=.8×clean_acc+.2×corrupted_noisy_acc；原标签acc=.8×clean_acc+.2×corrupted_original_acc。Flip观察标签acc比Adam低4.7150个百分点，其中clean代价贡献−.8378个百分点、减少匹配错误标签贡献−3.8772个百分点，约82.2%的表面下降来自后者；这是指标恒等式分解，非因果归因。完美预测原标签的分类器在20%强制错标下观察标签acc为80%，这是参照值而非观察标签acc上限，记住错标签可以更高。用户train曲线较低的观感在观察标签口径成立，不能直接作为真实分类能力差的证据。
+- **配对与阶段变化：** Flip最终test相对Adam在42/43/44种子分别+5.41/+3.57/+5.34个百分点（均值+4.7733），相对Filter+.23/+.61/+.34（均值+.3933）；三次方向一致，但不能由三训练seed宣称普遍显著性或跨污染图稳健性。第5轮平均test：Adam98.55%、Flip94.27%；第10轮98.5433%/95.6833%；第50轮93.3533%/98.1267%。Adam观察标签train acc持续升高同时corrupted原标签acc从第5轮98.2472%降至最终75.5139%，与后期增加错误记忆/泛化变差一致；Flip明显学习慢，clean最终较Adam低1.0472个百分点、较Filter低1.2201个百分点。仅描述事后均值曲线：Adam峰98.6567%在第8轮、Filter98.5167%在第15轮、Flip98.1367%在第47轮；不能用这些test峰值选模型。当前最终预算优势不证明优于有独立validation停止/正则化的Adam。
+- **loss与教授机制：** 最终clean CE均值Adam/Filter/Flip=.17350/.22895/.31749；corrupted错误标签CE=2.29435/3.11023/3.74913；corrupted原标签CE=.79408/.44120/.34167。Flip保留较高正确类别accuracy、几乎不匹配污染标签且最终test改善，为选择性学习提供正面证据；同时clean CE与clean acc未最优，不声称全面超越或严格复现教授未知配方。全程负alignment平均Filter38.2880%、Flip41.8589%，明显不是只处理20%错标的分类器；正确标签编辑不自动等于贡献优化错误。Flip编辑方向范数/原始范数均值约2.0695，不能以梯度范数抵消消失解释变慢。无逐样本分数及checkpoint，不能识别precision/recall、每次编辑净收益或唯一失败/成功机制。
+- **研究产物与来源：** 在results/files/mnist_review_20261030_fhcubve_/新增analysis.md、analysis_data.json，含最终/逐seed/逐轮accuracy、CE、配对差异、干预统计和来源链接；JSON保留459条派生逐轮记录、51份输入的相对路径/SHA256/行数与限制。未生成图表、XLSX或改原CSV；临时分析代码未写入项目源文件。报告表格结构已校验，原数据前后SHA256全部一致。
+- **验证及后续边界：** 独立将group top1×sample_count还原整数正确数，重算全train两口径；将末轮逐batch top1×128还原整数后重算online acc，均与主计算一致。summary final字段逐项等于最终evaluation，组节点完整、lr全23400步、dpco计数与窗口总步数检查通过，git diff --check通过。后续优先画固定分组accuracy和test完整过程，同时标明online观察标签口径；如新增独立validation或历史/编辑消融需另行授权。没有运行模型、启动训练、提交或推送；不据此改掉Flip或追逐test调参。
+
+
+### 2026-10-31 / DPCO-0034：澄清MNIST两套训练accuracy及教授clean subset与validation的区别
+
+- **用户请求与范围：** 用户批注前轮accuracy表，询问为何Adam train acc高而Filter/Flip“全部训练集按原标签”更好，且教授要求clean loss是否指clean validation。重读两级协议、最近记录、组会原文及总结，核对当前评价/指标源码与已有MNIST分析报告。本轮只解释和追加记录，不修改源代码、配置、原始CSV或实验方案，不启动训练。
+- **两个标签口径：** 本次60000张MNIST训练图中48000个标签保留、12000个标签被固定替换。online train_top1使用加噪后的实际训练标签，模型匹配错标签也计正确。“全部训练集按原标签”是冻结最终模型后，对同样60000张训练图片按加噪前原始MNIST标签作离线评价，由clean和corrupted_original的正确数合并，不是额外数据集、重新训练或训练reference使用真值，也不等同未见数据的泛化accuracy。clean组只指未污染的48000个训练样本，不能把60000张按原标签评价都称为clean subset。
+- **指标核对与例子：** 一张原标签7、训练标签被改成2的图片，预测7在观察标签train acc中算错、在原标签accuracy中算对；预测2则相反。冻结最终模型的观察标签acc=.8*clean_acc+.2*corrupted_noisy_acc，原标签acc=.8*clean_acc+.2*corrupted_original_acc。Flip两者约78.65%/98.13%；Adam83.36%/94.51%，排名不同源于答案标签不同，不是数据矛盾。前轮表第一行使用末468步online均值（Flip78.64%），与最终模型完整评价78.65%的小差异另来自时间口径；本轮明确说明两点。
+- **教授原话与未知划分：** 转写32:30–33:26及34:25–34:35要求clean subset loss低/下降、corrupted subset loss高，未明确说必须为独立clean validation，也没有完整规定clean subset来自train还是held-out集。当前以污染训练集内未污染48000样本实现，是具体落实选择，不应冒充会议已指定。全文唯一validation出现在15:43–16:24的DIVE reference来源介绍，不能据此推成此次实验必须用clean validation。独立validation用于调参/早停是助手额外建议，应与教授明确布置区分。
+- **按教授clean-loss要求收紧评价：** 最终clean CE为Adam.17350、Filter.22895、Flip.31749，clean accuracy为99.2611%/99.4340%/98.2139%。因此就“同样未污染训练子集上Flip的loss是否低于两个对照”而言，当前最终结果没有胜出；Flip的clean loss下降且错标签记忆较少、最终test准确率更高属于其他明确观察，不能替代clean loss比较。教授原话“低/降低”未给出精确数值阈值或普遍相对优势承诺，不把末点比较扩展为整个理论被否定。此前“部分机制现象得到支持”不能解释成已经证明教授要求的全部比较均成立。
+- **验证与未完成项：** 核对noisy_classification_evaluation三组均使用split=train、primary使用官方test，以及train_top1来自观察标签预测。现有evaluation.csv的val_top1为历史字段名，当前实际含义是官方test，未单独留出clean validation；其命名不能证明存在验证集。数值沿用前轮已独立复核的报告，无新增CSV处理或模型测试；git diff --check通过。仅本文件追加，未绘图、训练、提交或推送。
+
+
+### 2026-10-31 / DPCO-0035：讨论clean训练CE三图数据来源与原标签accuracy的定期评价
+
+- **用户请求与边界：** 用户拟画clean训练子集CE对step、对wallclock，以及全部训练集原标签accuracy对step，明确先讨论、不改代码，并询问原标签acc是否随每一步validate。本轮重读两级协议、近期记录，核对experiment.evaluate、评价触发、evaluation/recording字段及当前MNIST实际CSV，仅追加研究记录；不修改训练/绘图代码、配置或原始结果，不生成图。
+- **评价频率与含义：** MNIST本次记录节点为0、468、936、…、23400，共51次，每次对冻结的当前参数作完整固定分组前向评价，不更新模型参数、Adam moments、EMA reference或BN状态；不是每个训练step都对60000张原标签做评价。每步记录的train_steps.train_top1是当前batch按观察标签的online指标，不能替代原标签训练accuracy。此处validate指训练数据审计评估，不代表独立validation集。
+- **整体原标签accuracy重建：** group_evaluation每节点记录clean的48000张及corrupted_original的12000张完整原标签评价；二者分组互斥且覆盖60000张。按实际sample_count加权：(n_C*acc_C+n_N*acc_N_original)/(n_C+n_N)，本次为.8*acc_C+.2*acc_N_original，再乘100画百分数。整体值由已有分组准确合并，不是现有CSV里直接名为original_train_acc的一列，也无需重跑训练/模型。不得将corrupted_noisy误并入此图，亦不得把原标签评估理解为模型训练用原标签。
+- **三张拟议图：** ①横轴记录step，纵轴group=clean的普通CE均值；②相同clean CE，横轴训练循环累计wall-clock分钟；③相同step节点，纵轴上述全训练集原标签accuracy。三者是训练集审计曲线，不冒称验证/测试集曲线；评价样本和标签固定，CE不使用signed/贡献权重。已有数据只能画51个真实节点及连接线，不插值宣称每步全量评估；当前先保留原始节点，平滑如后续加入应按评价点计并明确窗口，不照搬每步train曲线的100点窗口。
+- **时间来源与范围：** group_evaluation没有elapsed_wall_s，需要同一run按step与evaluation.csv严格一一对应，取后者elapsed_wall_s/60。experiment.evaluate在同一state完成primary及全部group评价后记录该elapsed，表示这批评价指标可获得的累计时间，避免以train_steps的host dispatch时间冒充相应全量评价完成时间。横轴包括循环内JIT、评价、保存及训练开销，不包括进入实验循环前的TPU启动/下载准备/模型初始化；step0实际评价完成时间可大于0，不私自逐组平移清除开销。若要active训练时间需另用timing的train_window累计，属于另一时间口径，不能混标wallclock。
+- **多seed统计建议与验证：** step图可在相同节点对42/43/44求均值±样本标准差；各seed墙钟节点不同，后续实现需明确采用各seed原时间线、平均节点时间还是同时间网格重采样，不能把同step误称同wallclock。静态核对当前Adam42的CSV为153条group与51条evaluation，字段/节点与上述一致；无需新测试或正式运行。git diff --check通过；未实现新图、改算法、启动训练、提交或推送。
+
+
+### 2026-10-31 / DPCO-0036：讨论四张分组评价图与三seed显式路径接口
+
+- **用户请求与授权边界：** 用户在上一轮明确先讨论、不改代码的基础上，补充全训练集原标签accuracy对wallclock图，询问现有plots脚本如何传入每方法三个seed目录，并贴出原nohup命令。本轮只读现有入口和协议、提出待实现接口并追加本记录；未将“可以接入”的讨论解释为新增绘图功能的明确代码授权。
+- **现有能力核对：** plots/plot_dpco_training.py目前每方法一个--adam-dir/--flip-dir/--filter-dir字符串，读取train_steps.csv与timing.csv，画观察标签下的online训练指标；不读取group_evaluation.csv，也不汇总seed。当前argparse默认为store，重复同一参数只保留最后一个值，不能直接复制三次旧参数后声称已经画了三seed。路径解析现支持绝对路径、相对DPCO根目录路径和results/files下单个run名。Git起始只有本文件的历史追加变动，保留全部原文。
+- **建议接口（尚未实现）：** 保留三个单数参数名，改为可重复收集显式run路径，每方法传42/43/44三个目录；单次传入仍兼容原命令。不按最新时间或最佳结果自动选run，不要求搬动或重命名原始目录。建议增加--plot-set clean-original选择新的四图组，保留旧训练指标入口；--eval-smooth-window 1按评价节点计且默认不平滑，独立于旧--smooth-window按训练更新计的定义。上述新选项及多路径语义在当前代码不可用，给用户的参数片段是拟定接口，不是可立即运行的命令。
+- **四图定义和输入：** clean_train_ce_vs_step/time与original_train_accuracy_vs_step/time，纵轴分别为固定clean训练子集普通CE、全训练集原标签accuracy百分数，横轴为step或训练循环wall分钟。每run读取group_evaluation.csv，按sample_count合并clean与corrupted_original的top1，再与同run的evaluation.csv按step严格匹配elapsed_wall_s/60，不使用corrupted_noisy或train_top1替代。当前MNIST每run为51个真实评价节点，无需重训练；原标签指标是训练集审计而非独立validation。
+- **三seed统计建议：** 每seed先独立重建完整原标签accuracy，再对同step取等权均值及ddof=1样本标准差。墙钟图建议在该方法三个seed的实际时间共同覆盖区间上对记录点作分段线性插值后计算等权均值及样本标准差；每处统计保持n=3，不外推、不把训练时长归一化成相同终点，明确插值只服务对齐而非新增测量。可保留三个seed原始淡线帮助核对；标准差阴影仅描述这三个训练seed的离散度，不是置信区间、不包含未运行的新噪声划分。数据/噪声/方法/seed配置核查应尽量使用metadata，缺失时说明目录名与显式参数的证据限制；不按输入顺序自动断言seed配对。
+- **输出与未完成项：** 拟沿用Adam蓝、Flip红、Filter橙虚线、5×4英寸与axes高宽比.8，PNG/PDF及派生曲线和manifest输出DPCO/results/figures/<comparison_name>/，保留原始CSV与既有产物。原nohup后台包装在实现后可沿用，但当前没有执行依赖安装、绘图或服务器任务。仅静态接口核对与文档diff检查，不运行算法或渲染测试；待明确授权后再实现、验证并提供可执行九run命令。
+
+
+### 2026-10-31 / DPCO-0037：实现多seed固定分组四图，并用MNIST真实结果验证
+
+- **用户授权依据：** 用户明确要求“按照沟通来进行代码修改”，授权落实DPCO-0035/0036讨论的四图、显式多run输入、三seed统计、评价点平滑和原有绘图兼容。授权不扩展为训练算法、评价数据生产或实验超参数变更。本轮先读两级协议及近期记录；起始只有本文件历史追加改动，全部保留。
+- **涉及文件：** 修改plots/plot_dpco_training.py、plots/README.md，新增tests/test_dpco_evaluation_plots.py，追加本文件；真实派生图保存在下述results/figures新目录。没有修改src、configs、依赖声明、既有结果或历史绘图入口scripts/plot_training_results.py。
+- **入口与兼容：** --adam-dir/--flip-dir/--filter-dir改为可重复收集路径。新增--plot-set clean-original与--eval-smooth-window（默认1，不平滑），旧命令默认--plot-set training仍每方法一个run、生成原五图；旧模式传多run明确报错，避免静默只用最后一个。路径解析仍支持绝对路径、相对DPCO根路径及results/files下单个run名；重复实际路径拒绝，输入选择完全显式。
+- **指标与输入校验：** 新模式只读group_evaluation.csv与evaluation.csv，不需要train_steps/timing。clean普通CE取未污染训练子集；全训练集原标签accuracy按clean和corrupted_original的实际sample_count加权再乘100，排除corrupted_noisy，比例不硬编码。要求label_source=original、分组完整且唯一、同step样本出现数精确匹配、step/samples_seen/wall严格递增、固定组大小一致、有限数值及accuracy为0–1比例。clean为空报错；显式零样本corrupted允许空指标，不伪造缺组。各比较run的固定组大小必须一致。同方法重复run的step/samples_seen网格必须完全相同，拒绝因缺失节点而悄悄减少参与数。
+- **统计、时间与平滑：** 每run先重建指标，再在run内按最近E个评价节点作后向等权平滑（前缀不足时用已有记录），跨run等权取均值和ddof=1样本标准差，阴影非CI；单run标准差导出约定0，不表示不确定性已估计。Step图仅使用真实节点。时间图取评价完成时elapsed_wall_s/60，同方法所有run时间范围的交集内，以记录时间并集及交集端点为网格，逐run分段线性插值后统计，保持每处全部run参与；无外推、时长归一化或虚构更密的真实评价。原始淡线保留各run完整实际记录范围，--no-raw可隐藏。保留非零step0时间，包含循环内训练/JIT/评价/保存，排除循环前准备初始化；新模式只接受wall。旧--smooth-window在新模式不使用。样本标准差带完整显示，未在0/100边界裁剪。
+- **元信息与可追溯性：** 有对应metadata时核验方法/Adam/EMA/负权重并使用配置seed；从标准run名读出的seed标为directory_name_unverified，元信息与目录seed矛盾或同方法重复已识别seed报错。元信息缺失、身份未认证、重复数/seed集合或配置/数据指纹不一致明确写入提示和manifest；不同训练seed不会再被误当不匹配训练设置。没有从输入顺序虚构seed或进行配对显著性推断。导出evaluation_runs.csv、evaluation_step_curves.csv、evaluation_time_curves.csv以及最终完成manifest，保留源文件SHA256、样本数、实际节点/seed来源、插值/平滑/SD定义、共同时间范围和脚本哈希；输入改变时拒绝完成manifest。
+- **绘图与运行文档：** 新增clean_train_ce_vs_step/time和original_train_accuracy_vs_step/time，各PNG/PDF，仍为5×4英寸、PNG220DPI、axes高宽比.8，Adam蓝实线、Flip红实线、Filter橙虚线。输出results/figures/<新名称>/，拒绝覆盖。README说明两种模式、九个精确run名和完整服务器nohup命令，明确base可指向另一CSV根目录，提供日志/PID/查看方式与绝对服务器Python；没有擅自运行该服务器命令。
+- **验证过程与结果：** 新增7项有独立数值预期的分组/多seed测试，加既有8项DPCO绘图及10项历史绘图，共25项全部通过（9.672秒）。覆盖非等大小分组的原标签权重、评价平滑、空corrupted、ddof=1、共同时间区间与插值边界、缺组/重复/标签口径/单位/非有限/样本数/时间倒退拒绝、重复seed/网格不齐/时间无交集、元信息身份、九目录真实CLI渲染、四PNG/PDF、导出行数/seed、输出防覆盖、源字节不变、颜色比例、原五图兼容及无第三方依赖help。初轮环境缺matplotlib，另有测试fixture目录编号被误作seed导致身份检查失败；已修正fixture名称并复用已有/private/tmp/sage-plotting-venv，不安装或修改依赖。Python AST、README两段bash -n及git diff --check通过。
+- **真实MNIST产物与独立复核：** 读取外层Results/Minist/files九run，在results/figures/mnist_clean_original_3seeds_20261031_114630_957697/生成四PNG、四PDF、三CSV及manifest。逐张查看四图，无标签/图例裁剪，颜色与比例正确。独立将源top1×组样本数还原整数正确数，复核全部459个实际评价节点的整体原标签accuracy及时间、153个step汇总点的均值/样本标准差；18个输入CSV的当前SHA256与绘图前记录完全一致。末节点Adam/Flip/Filter clean CE=.17350320095/.31749141439/.22894647217，原标签train acc=94.5116667%/98.1288889%/98.4544444%，与既有分析一致。每run51评价点，三seed阴影不增加独立观测或新污染图证据。
+- **理论边界与未完成项：** 本次只改变离线画图及其派生数据，无训练目标、reference、翻转逻辑或泛化保证新结论。clean子集与全部训练集原标签评价均非独立validation；真实输入无metadata，方法/seed/模型配置认证限制已写入manifest。没有启动训练、重新生成噪声、覆盖旧产物、提交或推送；用户同步修改后的代码到服务器后可运行README命令。未实现多seed旧online训练五图或active时间分组图，超出本轮约定范围。
