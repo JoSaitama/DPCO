@@ -37,6 +37,8 @@ class DataConfig:
     label_noise_percent: float = 0.0
     # CNWL official Red split selector, NOT a label-noise generator.
     cnwl_noise_percent: int = 20
+    # Immutable offline CLIP artifact; training never generates/changes these labels.
+    noise_manifest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,10 @@ class RunConfig:
         if self.data.name != "cnwl" and self.data.cnwl_noise_percent != 20:
             raise ValueError("cnwl_noise_percent requires dataset=cnwl")
         cifar_models = CIFAR_MODELS
+        if self.data.noise_manifest is not None and (
+                self.data.name not in ("imagenet100", "imagenet1k")
+                or not isinstance(self.data.noise_manifest, str) or not self.data.noise_manifest.strip()):
+            raise ValueError("noise_manifest requires an ImageNet100/1K artifact path")
         if self.data.name == "cnwl":
             selected = self.data.cnwl_noise_percent
             if isinstance(selected, bool) or selected not in (0, 5, 10, 15, 20, 30, 40, 50, 60, 80):
@@ -272,6 +278,15 @@ class RunConfig:
                 raise ValueError("MNIST requires image_size=28 and a supported classification model")
             if self.probes.enabled or self.diagnostics.enabled or self.mechanism.enabled:
                 raise ValueError("MNIST uses grouped evaluation; legacy observers must be off")
+        elif self.data.noise_manifest is not None:
+            if self.data.noise_type != "clip_idn" or self.data.is_human or self.data.mode != "noisy":
+                raise ValueError("ImageNet noise_manifest requires noise_type=clip_idn, is_human=false, mode=noisy")
+            if self.data.noise_seed != 0 or self.data.download:
+                raise ValueError("ImageNet noise is fixed by its artifact; set noise_seed in the preparation script, not training")
+            if self.model.name not in IMAGENET_MODELS:
+                raise ValueError("ImageNet CLIP noise requires an ImageNet ResNet backbone")
+            if self.probes.enabled or self.diagnostics.enabled or self.mechanism.enabled:
+                raise ValueError("CLIP-noisy ImageNet uses grouped evaluation; legacy observers must be off")
         elif (self.data.noise_type is not None or expected_noise is not None or not self.data.is_human
                 or self.data.noise_seed != 0 or self.data.download or self.model.name in cifar_models):
             raise ValueError("CIFAR noise controls/models require dataset=cifar100n")
@@ -373,6 +388,8 @@ class RunConfig:
 
     def as_dict(self) -> dict:
         result = asdict(self)
+        if self.data.noise_manifest is None:
+            result["data"].pop("noise_manifest")
         if self.data.name != "cnwl":
             # Preserve existing dataset metadata and checkpoint resume identities.
             result["data"].pop("cnwl_noise_percent")

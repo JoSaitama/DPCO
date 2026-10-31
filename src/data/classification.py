@@ -45,7 +45,21 @@ def open_training_images(config, base_dir, *, limit=None, progress=None):
         raise ValueError(f"Unsupported classification dataset: {config.name}")
     from src.data.imagenet_hf import DataPlan, label_mapping, prepare
     mapping, manifest_hash = label_mapping(config, base_dir)
-    plan = DataPlan(config.hf_repo_id, config.hf_revision, mapping, manifest_hash, limit, limit)
+    # Noise artifacts always refer to the full prepared source, even for smoke views.
+    source_limit = None if config.noise_manifest else limit
+    plan = DataPlan(config.hf_repo_id, config.hf_revision, mapping, manifest_hash, source_limit, source_limit)
+    if config.noise_manifest:
+        from src.data.images import PreparedImages
+        from src.data.imagenet_clip_noise import NoisyImageNetImages
+        manifest = Path(config.noise_manifest).expanduser()
+        if not manifest.is_absolute():
+            manifest = Path(base_dir) / manifest
+        # No implicit dataset download or CLIP inference inside training.
+        images = PreparedImages(directory / plan.fingerprint[:24] / "images.sqlite", plan.fingerprint)
+        images = NoisyImageNetImages(images, manifest, noise_percent=config.noise_percent, limit=limit)
+        if progress:
+            progress(event="data_ready", **images.identity)
+        return images, images.identity
     if progress:
         progress(event="data_prepare_start", dataset=config.name, source=plan.repo_id,
                  revision=plan.revision, limited_smoke_samples=limit,

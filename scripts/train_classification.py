@@ -44,7 +44,7 @@ def run(args, config, devices, *, status):
         raise ValueError(f"Global batch size {batch_size} must be divisible by {len(devices)} local TPU devices")
     if config.execution.gradient_backend != "jvp":
         raise ValueError("TPU entry requires execution.gradient_backend='jvp' to avoid full training Jacobians")
-    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist", "cnwl"):
+    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist", "cnwl") and not config.data.noise_manifest:
         raise ValueError("Data mismatch modes are not implemented; a label must not silently leave data clean")
     limit = max(32, 2 * batch_size) if args.mode == "smoke" else None
     images, data_identity = open_training_images(config.data, ROOT, limit=limit,
@@ -123,6 +123,11 @@ def run(args, config, devices, *, status):
             from src.training.evaluation import noisy_classification_evaluation
             evaluation = noisy_classification_evaluation(images, eval_task, batch_size, image_size,
                 "official_mnist_test_eval_no_model_selection", batch_metrics)
+        elif config.data.noise_manifest:
+            from src.training.evaluation import noisy_classification_evaluation
+            evaluation = noisy_classification_evaluation(images, eval_task, batch_size, image_size,
+                "clean_imagenet_validation; fixed_noisy_train_audit", batch_metrics,
+                include_all_original=True, select_best=True)
         probes = None
         if config.probes.enabled:
             batches = []
@@ -155,7 +160,7 @@ def run(args, config, devices, *, status):
             "evaluation_split": ("official_cnwl_shared_clean_validation" if config.data.name == "cnwl" else
                 "official_test_monitor_only_no_best_selection" if config.data.name in ("cifar100n", "mnist") else "configured_validation"),
             "group_evaluation": ("clean original-label and corrupted observed-label groups only; web oracle labels unavailable; audit metadata excluded from training" if config.data.name == "cnwl" else
-                "fixed reference-label clean/corrupted groups; truth metadata excluded from training batch" if config.data.name in ("cifar100n", "mnist") else None),
+                "fixed reference-label clean/corrupted groups; truth metadata excluded from training batch" if config.data.name in ("cifar100n", "mnist") or config.data.noise_manifest else None),
             "train_tail": "drop_last_to_exclude_padding_from_training_batchnorm",
             "evaluation_tail": "padded_with_valid_count_weighting",
             "optimizer": config.training.optimizer,

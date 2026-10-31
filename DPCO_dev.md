@@ -670,3 +670,176 @@
 - **依赖与输出：** 新增cnwl可选OpenCV依赖并纳入test extra，运行时JAX训练不依赖TensorFlow/PyTorch；data extra供准备阶段NumPy/Pillow/certifi。为本地验证仅在/private/tmp/dpco-cnwl-testdeps装OpenCV4.14，不改用户全局或服务器环境。docs/cnwl.md给出安装、准备和三组训练的nohup后台命令，stdin/dev/null、独立results/logs日志及PID/查看方式、显式项目Python；代码开发没有执行服务器正式命令。准备报告位于results/files/cnwl_prepare_<时间>；训练继续files/runs/logs三级同run名。
 - **验证结果：** 55项相关测试通过（含9项CNWL测试及原config/suite/MNIST/CIFAR测试），共约18秒；本地原始tar与canonical图片两种准备路径逐图像素/标签一致、数字排序而非字典序/文件名后缀、metadata zip读取及中断补齐、错误标签/重复ID/越界/篡改拒绝、web URI下载模拟及403报错、缺图不发布与299行暂存后仅重做1行、nominal选择与actual断言区分、训练batch排除audit真值、分组CE与独立NumPy核对、3种方法真实共享runner/updater/EMA/CSV/checkpoint及p50到final逐项精确恢复。训练集成测试使用CPU小模型和明确合成夹具验证通路，不声称ResNet50 TPU性能或真实自然噪声学习结果。首轮一个CE断言仅差5.72e-7浮点累加误差，改成显式float32合理容差后通过；没有调整算法。shell bash -n、官方40档prepare plan（50010/5000）、三组Red20 wrapper dry-run、CLI父子传递和git diff --check通过。
 - **验证产物与真实数据限制：** results/files/cnwl_integration_check_20261031_155223/保存validation.json和three_method_plan.json，results/logs/同名目录保存tests.log。官网zip通过浏览和获批curl实测均HTTP403，故未完成真实标注包/全量图片获取或完整Red准备；原始ImageNet归档也未在本次任务获取。人工取得原官方材料后可按docs/cnwl.md运行准备，旧web失效图仍须恢复同一图片，不能静默删除后宣称原benchmark。未启动正式训练、未测TPU、未产生CNWL研究准确率，不作DPCO收益保证。代码接入及本地验证完成，后续真实源可用性/服务器准备与实验结果尚待实际执行。
+
+
+### 2026-10-31 / DPCO-0049：提供CNWL Red20、ResNet50、reference beta=.9三组一次启动命令
+
+- **用户请求与边界：** 用户要求reference beta=.9，给出CNWL20%噪声的Adam、DPCO Filter、DPCO Flip训练代码，其他参数基本沿用之前CIFAR100N，并确认是否ResNet50。本轮只读协议与两份preset，核对命令及追加记录；不修改源代码/配置/脚本、不替用户启动服务器正式训练。起始Git干净，前轮修改已在用户现有状态中保留。
+- **选定设置及模型说明：** 使用configs/tpu/cnwl/dpco_adam.toml，显式--dataset cnwl --model resnet50，随机初始化、输入84×84、100类；这是当前CNWL preset的既有ResNet50。沿用用户此前CIFAR正式长实验命令（而不是CIFAR TOML中的100步pilot）：seed42、B128、78000步、lr3e-4 cosine到1e-6、Adam beta1=.9/beta2=.999/epsilon1e-8、L2=0、无SGD momentum/Nesterov、390步评价、1950步存latest并开启checkpoint。Red20的50000张训练图每drop-last遍历390步，78000步为200次drop-last遍历，样本出现进度约199.68epoch。此为保持可比训练预算的探索设置，不宣称CNWL最优。
+- **方法/噪声语义：** 同一套件--methods adam dpco_filter dpco_flip --wait，依次训练3run，Filter/Flip自动对应weight0/−1，不共传冲突negative-weight。--reference-beta .9只作用于两种DPCO的raw batch-gradient EMA，普通Adam没有该reference；Adam自身两矩betas单独给出。--cnwl-noise-percent20选择官方Red档位，--noise-type red --is-human --noise-seed0固定发布标签，--no-download复用完整cache，不把--noise-percent20实际率断言误作生成器。
+- **后台与准备前置检查：** 一条nohup bash -c中set -euo pipefail，显式Python /home/jason_chia925_gmail_com/Project_DPCO/.venv/bin/python，先scripts/prepare_cnwl.py --stage verify --data-dir /home/jason_chia925_gmail_com/Project_DPCO/data/cnwl --cnwl-noise-percent20，再exec scripts/run_suite.py，校验失败停止且不开始TPU训练。不认为普通ImageNet缓存等于CNWL prepared/red_20；此前官方zip403未被本轮证明恢复可用。外层stdout/stderr写results/logs/cnwl_red20_resnet50_b09_<时间>.log、stdin/dev/null、&后台、同名.pid与echo PID/LOG；提供tail -f查看方式。每run仍分别写results/files、runs、logs同名目录。
+- **验证与未完成项：** 本地run_suite --dry-run核验精确3计划、Red20/ResNet50/100类、预算/lr/eval/checkpoint、方法权重与reference beta、Adam子进程参数及wait；完整拟发命令bash -n通过、git diff --check通过。没有下载源数据、安装服务器依赖、连接TPU、启动训练、提交或推送；数据真实准备状态和实验收益待用户服务器实际校验/运行。
+
+
+### 2026-10-31 / DPCO-0050：解释Red20缓存缺失并提供后台下载/准备命令
+
+- **用户请求与边界：** 用户服务器报prepared/red_20/manifest.json不存在，要求服务器自动下载数据集命令。本轮读取协议、prepare入口/实现和最新记录，并核对官方数据说明，只提供现有程序的使用命令及追加文档；不将命令请求扩展成新数据源适配/下载器修改授权，不在本机或服务器执行全量准备/训练。保留本文件已有未提交DPCO-0049。
+- **报错含义：** 上轮脚本先运行--stage verify，它只读完成缓存而不下载/构建，因此缺少manifest即尚未在该路径发布完整Red20缓存（或data-dir指错），不是Adam/ResNet/EMA训练错误。此前套件set -e，在校验失败后不继续启动三组训练；不建议删除检查或伪造manifest绕过数据准备。
+- **实际命令：** 同一nohup bash后台任务中set -euo pipefail，显式项目Python先pip install -e .[data,cnwl]，再scripts/prepare_cnwl.py --stage prepare --data-dir /home/jason_chia925_gmail_com/Project_DPCO/data/cnwl --manual-dir <同目录>/raw --cnwl-noise-percent20 --download --workers8，成功后--stage verify。stdout/stderr写results/logs/cnwl_red20_prepare_<时间>.log，stdin/dev/null、&后台，保存.pid并输出PID/LOG及tail -f命令；prepare/verify报告由入口写results/files/cnwl_prepare_<时间>。这一步没有自动串接正式训练，准备确认成功后再运行DPCO-0049三组命令。
+- **自动下载范围和必要源文件：** --download仅下载CNWL官方metadata zip、该Red20 split所需的原始web URI并准备缓存；干净图片仍需按官方流程先取得ILSVRC2012_img_train.tar和ILSVRC2012_img_val.tar，默认放data/cnwl/raw，已有完整官方源目录可用--manual-dir避免复制，也可按既有接口提供保留官方ID的clean_images/validation_all。官方 https://www.tensorflow.org/datasets/catalog/controlled_noisy_web_labels 明确列为manual download；https://google.github.io/controlled-noisy-web-labels/download.html 发布URI/标注/split，不是一个无需ImageNet原图即可完整下载的成品。普通ImageNet100或现有HF SQLite缓存不被当前CNWL raw适配器直接读取，不能只改路径就宣称兼容。若原始ImageNet源尚无，当前命令不能从空目录无条件完成整个数据集，不作相反承诺。
+- **外部可用性与恢复限制：** 重新查看作者下载页，网页链接仍指向https://storage.googleapis.com/cnlw/dataset_no_images.zip，本轮浏览工具仍无法访问该zip，之前实际curl403的状态尚未获得恢复证据。若服务器也HTTP403，需取得原作者发布包后放raw/或恢复官方来源，重复verify不会下载解决；不把未验证镜像作为同一发布。已完成文件/SQLite行可复用，单个中断HTTP文件不承诺字节续传；旧web链接失效仍明确报错，不能静默删图或随机改标签。
+- **验证结果及未完成项：** 完整拟发命令bash -n通过；现有prepare --stage plan解析相同data/manual目录、Red20/50000训练/5000验证、84像素、download=true及workers8，无网络/数据写入/TPU访问。git diff --check通过。尚未确认服务器是否已有原始ImageNet归档及官网zip在其网络下可访问；没有修改程序、安装服务器环境、生成真实CNWL缓存、启动训练、提交或推送。
+
+
+### 2026-10-31 / DPCO-0051：实测CNWL标注包403权限响应并核对替代来源边界
+
+- **用户请求与范围：** 用户服务器执行DPCO-0050准备命令后出现urllib HTTPError403，要求排查。本轮阅读协议/记录、核对官方来源与后续作者发布入口，执行本地有大小/时间限制的网络诊断并追加本记录；不修改代码/配置/脚本、不改数据定义或分辨率、不下载全量数据、不启动服务器训练。保留本文件此前未提交追加。
+- **实际故障证据：** 对https://storage.googleapis.com/cnlw/dataset_no_images.zip重新发出诊断请求，得到HTTP403、379字节XML。GCS Code=AccessDenied，Details明确匿名caller没有storage.objects.get权限，同时保留“or it may not exist”的可能性；不能进一步断言文件已删除或任意Google登录即可恢复权限。对应代码下载路径在metadata_directory下载官方zip时会直接传播HTTPError；网络图片单图403会被捕获汇总，故用户目前未捕获的403高度符合首个metadata包失败，非Adam/ResNet参数或GPU问题。前轮本地通路检查不等于真实源可用性，当前84像素raw准备路线尚不可从官网无条件完成。
+- **来源检索与替代候选：** 官网下载页、官方TFDS仍引用同一个受拒zip。核对Google Research/TFDS问题检索及多个后续项目，没有核实可直接替换该84像素原始元数据包的完整可用镜像。CVPR2021 FaMUS作者仓库 https://github.com/youjiangxu/FaMUS README（blob79c351272c2e097d9b535098a8feccad4690c291）明确提供32×32 CNWL TFRecord成品，链接 https://drive.google.com/file/d/12KLkFaIDLlQ4bYIQL7xVeqX3H1d0r4_o/view?usp=sharing 。作者含CNWL原作者Lu Jiang，是有明确论文作者来源的候选，不将其与未经核实网盘混同。baselines/code_mentormix_r32/README.md列出20/40/60/80档位目录；其dataset parser读取image/encoded、image/class/label，验证读取image/class/fine_label。现读代码未使用is_clean/id字段，不据此证明成品一定包含可还原clean mask的全部元数据。
+- **替代可用性和兼容性限制：** 该Drive网页可识别文件名red_mini_imagenet_s32.zip，但本地对作者公布文件的usercontent下载端点仅请求前1KB、30秒超时且未取得数据字节；不能声称已验证可下载或断言它已失效。该包32像素TFRecord不同于当前84像素raw适配器，不能只替换zip URL直接训练；即使下载成功仍需核对实际记录/划分/clean标识并明确授权新增导入和配置，不能上采样后冒称原始84信息。自然错标来源可以沿用CNWL，但不保证当前分组审计所需字段齐全。
+- **下一步研究/操作边界：** 保持当前84设置的路线是取得作者原metadata包或由发布方恢复链接权限（官网提供controlled-noisy-labels@googlegroups.com联系方式），不建议反复运行同一403命令、删除校验或重新随机造标签。FaMUS32成品为可考虑的另一条路线，先确认用户网络/浏览器能下载及包内信息，再讨论相应导入，不默认用户已同意改变实验输入分辨率。未通过工具给作者/其他人发消息，未提出已成功的一键替代命令。
+- **验证与产物：** 诊断JSON存入results/files/cnwl_download_diagnosis_<本轮时间>/，官方响应XML及header存results/logs/同名目录；只有379字节错误正文和只读源码/网页，未取得数据图片。git diff --check通过。真实84源的可用性、FaMUS文件下载与字段完整性、服务器数据准备和训练仍未完成，不产生新实验结论或收益保证。
+
+### 2026-10-31 / DPCO-0052：确认用户Mac可下载FaMUS成品包及后续检查边界
+
+- **用户依据与范围：** 用户确认该Google Drive链接在本机Mac可以下载，服务器尚不清楚。本轮读取协议、开发记录和现有CNWL输入限制，仅核对与讨论获取路径并追加记录；该确认不构成修改数据读取器、依赖或实验分辨率的授权。
+- **可用性与建议：** 将Mac可下载视为用户当前网络环境的报告，不外推服务器直连Drive也可用。可先在Mac完整下载作者发布的red_mini_imagenet_s32.zip，再沿用户现有SSH传输通道上传服务器；服务器地址、SSH别名、云项目和区域未知，不用内部TPU主机名编造可执行上传命令。下载完成后先取得本机实际文件路径进行只读检查，再确定导入工作。检索Downloads文件名未匹配到该包，不能据此断言用户未下载或其他目录不存在。
+- **兼容性与证据边界：** 当前CNWL配置和读取器要求84×84准备缓存；FaMUS作者发布的是32×32 TFRecord包，取得文件本身不等于现有训练命令已可读取。需实际检查压缩包完整性、20%划分、样本数、字段以及clean标识/样本ID的可追踪性；不能预先保证clean训练子集曲线可恢复，不能把上采样称为原始84像素数据。自然噪声与具体发布版本的描述沿用0051，本轮没有新的算法理论或实验收益结论。
+- **涉及文件、验证与未完成项：** 仅追加DPCO_dev.md；源码、脚本、配置、依赖和数据未修改。完成只读接口核对，git diff --check通过。实际成品包尚未由本代理取得或检查，服务器下载/上传可用性和适配范围待核实；未启动全量下载或训练，未提交或推送。
+
+### 2026-10-31 / DPCO-0053：低开销检查用户下载的FaMUS CNWL32包
+
+- **用户依据、目的与范围：** 用户告知已将数据放入可访问目录，并明确要求控制usage。本轮不联网、不启用代理、不安装依赖、不修改代码；用Python标准库查看ZIP目录、先抽查9条记录，再仅顺序读取0%、20%和clean_validation三个成员，未解压全包或读取其他噪声档位。追加本记录及小型检查报告，保留已有修改。
+- **实际文件与划分：** 项目根目录red_mini_imagenet_s32.zip为1433495917字节，目录包含0/5/10/15/20/30/40/50/60/80%以及clean_validation。实际遍历确认0%和20%各50000条，验证集5000条，各含100类、标签范围0–99。三个成员均读至结尾并通过ZIP成员CRC检查，TFRecord长度边界检查通过；未执行TFRecord逐条CRC检查或全包所有成员完整性检查。三个目标成员顺序检查约1.7秒。
+- **字段与重要限制：** 三个划分的全部记录仅含image/encoded、image/format、image/class/label、image/class/fine_label；format=raw、像素3072字节，与作者32×32×3说明一致。未发现is_clean或样本ID；全部记录fine_label与label相同。因此不能将fine_label误读为噪声图片的独立原始真值，无法直接复用MNIST按原标签准确率或官方clean训练子集审计。
+- **有限匹配诊断而非噪声率估计：** 以原始像素SHA256匹配0%数据，20%中36892条图像可匹配，其中36891条还具有同样标签，1条匹配像素但标签不同，13108条像素未匹配。0%含49993种像素哈希，6个哈希关联多个类别，存在重复/冲突。匹配覆盖率不等于作者标注的clean比例，不能把13108/50000解释为实际26.216%噪声，也不能凭相同像素就承诺完整准确恢复clean mask。需要作者来源信息或进一步核实生成过程，不能将此启发式冒充发布标注。
+- **产物与后续边界：** 检查报告为results/files/cnwl_archive_inspect_20261031_183507/inspection.json。本轮仅新增该诊断JSON及DPCO_dev.md记录，git diff --check通过。包可作为后续32像素TFRecord适配的本地来源，尚不被现有84像素缓存读取器直接支持；模型输入/增强、准备导入及分组指标的调整须在明确修改授权后实施。未上传服务器、下载其他文件、启动训练、提交或推送。
+
+### 2026-10-31 / DPCO-0054：检索Hugging Face原始CNWL84来源并区分普通Mini-ImageNet
+
+- **用户授权与目的：** 用户希望保留原始84像素CNWL路径，明确要求去HF寻找下载来源，继续控制usage。本轮仅查询公开目录API、少量候选数据卡/文件列表及官方说明，不下载大数据、不安装依赖、不修改程序或配置、不启动训练。网络查询遇沙箱DNS失败后依规则申请联网，随后使用系统可信证书解决Python默认证书链问题；未关闭TLS校验。
+- **HF检索范围与结果：** API名称查询cnwl、cnlw、controlled_noisy、controlled-noisy、redmini均为空；imagenet-red/imagenet_red仅返回若干名称含reduced/redo的其他数据，mini-imagenet返回31个候选。此前mini_imagenet/miniimagenet也作同类检索。公开Web精确检索没有补出可验证的CNWL84成品源。结论限于本轮公开检索“未找到可核实镜像”，不声称整个HF绝对不存在、私有/未索引仓库不存在。最终8组目录查询保存results/files/cnwl_hf_search_20261031_184130/hf_search.json。
+- **候选核对与排除边界：** Artonix/Mini-imagenet-84文件表仅见miniimagenet_train_84.npy、val_84.npy、test_84.npy，总约3.37GB且无数据卡，无法确认包含CNWL自然噪声档位/is_clean，不推荐当同一基准。timm/mini-imagenet数据卡明确是原分辨率普通ImageNet100类子集，50000/10000/5000，作者还说明类别/划分不匹配常引用Mini-ImageNet，不是CNWL替代。niuniandaji/mini-imagenet-c为ImageNet-C像素扰动鲁棒性子集，保留原标签，非自然错标训练集。nickypro/mini-imagenet页面为空；SKNahin/mini-imagenet-84by84页面本轮浏览不可访问，未据名称认定其来源或可用性。没有下载这些候选。
+- **原始协议澄清：** 官方TFDS https://www.tensorflow.org/datasets/catalog/controlled_noisy_web_labels 再次确认84×84为预处理尺寸，Red包含10个噪声档位及共享clean validation，输出id/image/is_clean/label，标明Manual download required和Auto-cached:No。不是承诺官方有可直接取得的完整84像素ZIP；当前代码的84缓存属于按此流程生成的本地缓存。官方 https://google.github.io/controlled-noisy-web-labels/download.html 实际提供URL/标注/split元数据，仍需原ImageNet干净图及web图片。仅补普通84 Mini-ImageNet不能补回CNWL自然错标和官方clean标识；找到官方元数据镜像或已生成的原协议完整缓存才可解决对应缺口，且新缓存格式仍需检查兼容。
+- **验证及未完成项：** 仅新增检索报告并追加本文件，git diff --check通过；保持0051的官方GCS403既有证据，本轮未重下载验证其恢复。没有找到可保证直接下载/直接训练的原始84成品URL，没有取得缺失元数据、发邮件联系作者、上传服务器、提交或推送；不将同分辨率数据或32像素上采样描述成原始CNWL84。
+
+### 2026-10-31 / DPCO-0055：澄清mini-imagenet-tools可补干净图片但不能补CNWL自然噪声
+
+- **用户请求与操作边界：** 用户提供yaoyao-liu/mini-imagenet-tools的Usage及链接，询问其数据是否可用。本轮只读该仓库README、生成器、官方TFDS说明及本项目既有准备接口，追加说明；未克隆仓库、下载ImageNet、修改代码/配置或启动训练。
+- **可用部分与更正表述：** 可以将该工具及其依赖的ILSVRC2012_img_train.tar作为普通Mini-ImageNet干净图来源。工具描述100类、每类600张，默认84像素，64/16/20类为few-shot任务的训练/验证/测试划分；它不是CNWL作者的自然噪声数据发布页。TFDS的CNWL实现引用该工具仓库CSV选择干净图片，故两者确有来源关联，不能笼统表述为“该数据不能用”；但这种关联不赋予它CNWL web错标、噪声档位及is_clean标注。
+- **协议差异与实际缺口：** 生成器只从ImageNet训练归档选图、重命名并缩放，不读取CNWL自然噪声标注/Red split，也不提供CNWL独立clean validation所需的原ImageNet验证图。生成器的few-shot val/test不应直接冒充CNWL clean validation。20%Red仍需CNWL元数据及官方指定web图；因此即使获得138GB训练归档，原先元数据403缺口仍在。官方Red20训练50000/验证5000不等同于该工具60000张的64/16/20类别划分。
+- **接入建议与验证边界：** 当前准备器已经支持直接读取ILSVRC2012_img_train.tar和ILSVRC2012_img_val.tar；若两者已有，无需先运行该工具再缩放。若改用工具产物作为clean_images需保留并核对canonical ID/类别，默认JPEG与再次预处理可能不同，不能保证逐像素等同；未对实际产物做匹配或声明已即插即用。仅追加本开发文档，git diff --check通过，完整84像素自然噪声来源仍未补齐。
+
+### 2026-10-31 / DPCO-0056：核对近期CNWL论文作者仓库是否发布完整数据
+
+- **用户请求与授权边界：** 用户质疑仅检索HF不充分，要求核对近期引用CNWL的论文是否公开数据。本轮查询论文、作者README、有限目录/数据加载器及相关公开Issues/Releases；不下载图片、不安装环境、不修改代码、配置或依赖、不启动训练、不联系作者。控制范围，不将“查到使用数据”写成“查到完整数据下载”。
+- **CARE（ICML2026）：** 作者仓库qwq123-study/CARE的README标明ICML2026，公开主分支22a43ddfaac13dc1625572cfd52f598274505e7c。本轮README、完整文件树、空Issues与空Releases未找到完整CNWL图片/标注包链接。datasets/lt_mini_imagenet.py（blob160991e9aa04bf70621393fb7cb3f15defc41771）从root/all_images、validation_all和split读取，干净池来自blue_noise_nl_0.0，web池从red_noise_nl_0.8按ID筛选后重组长尾；这说明代码依赖预先整理的CNWL，不证明下载源公开，也不等于直接沿用标准Red20训练集。原图实际尺寸无法仅由该加载器确认。
+- **CLIPCleaner（ACM MM2024）：** MrChenFeng/CLIPCleaner_ACMMM2024 README（blob569c2ab5f2b69866300c4c6a412d4a4e4a635222）给出red_imagenet本地dataset_path及noise_ratio示例；README、文件树、全部5个公开Issues和空Releases未找到完整CNWL下载链接。datasets/dataloader_redimagenet.py（blob09fff2c16ada0d902de8f72b43de69928d7c8a36）1072行读取mini-imagenet-annotations.json，1084行明确使用image/class/label/is_clean，1090行使用split/red_noise_nl_<ratio>，1101行读取all_images。该项目保留分组真值的接口，比仅有32TFRecord更适合作为索取官方标注/图像对应关系的线索；未确认其本地原图分辨率，不因后续transform尺寸推断原始尺寸。
+- **其他近期核对：** PASS作者仓库arpit2412/PASS-NoisyLabel当前树0573db04aef0ae5c686fa74dee678f481db835f4与README只提供CIFAR训练相关公开实现，未找到Red Mini-ImageNet下载。其论文2025年12月在线、2026卷期可证实使用Red基准，但不能推定复现数据也公开。meruemon/ACD-U（2026预印本）当前树1dd839c7c5eb989a93c6c29bf749e157c86dc931、README明确限量发布，数据/训练模型/完整文档拟待评审后补充，未找到CNWL数据。ECCV2024 arpit2412/NoiseRateLearning README列Red实验但当前主目录仅LICENSE、NoiseRateEstimator.py、README，未给完整数据包。更早InstanceGM（WACV2023）README明确要求本地已备数据并指回CNWL官网；PLS/SNCF的README未补出原始84完整镜像，SNCF的miniImageNet Drive链接被说明为预训练权重/噪声检测产物，不误当图片集。
+- **已验证与未找到的区别：** FaMUS（CVPR2021）仍是本次链路中明确公开CNWL成品包的作者来源，但为32像素，且用户实包经0053确认缺is_clean/id；不能用它证明84原始包已找到。近期项目“发表实验/公开代码”与“公开完整数据”分别判断。对于CARE、CLIPCleaner，只报告在所检查公开位置未见链接，不断言作者无数据、不能分享或全网绝对不存在。可向其作者索取保留ID的all_images、validation_all、官方split/class_names/annotations以及图像处理说明，从而避免强制重新取得全量ImageNet和失效web URI；这仍是待取得的路线，未发送任何消息。
+- **涉及文件及验证：** 仅追加本开发文档；原代码、32像素ZIP及实验结果保持不变，git diff --check通过。尚未找到经验证可下载的84像素完整自然噪声包，也未核实候选私有分享/数据尺寸和映射；研究结论为来源调查，不产生算法实验结果或收益保证。
+
+### 2026-10-31 / DPCO-0057：区分GCS身份认证与授权并提供登录浏览器检查入口
+
+- **用户请求与范围：** 用户询问Anonymous caller拒绝能否通过变为正常caller解决。只核对Google Cloud官方认证、请求端点、公开访问与403排障说明，追加文档；不修改代码、切换用户账号、读取凭据、修改IAM或执行下载/训练。
+- **技术结论及边界：** 可以使用Google账号/服务账号身份请求，但身份认证不等于拥有该cnlw桶内对象的storage.objects.get权限。若发布方允许已认证用户或已授权该账号，认证可能解决；否则仍需发布方授予读取权限、恢复公开访问或提供签名链接。匿名403只能证实该匿名请求失败，不能证实认证后必失败，亦不能证实对象确实存在/已删除。给用户自己项目授予角色不赋予作者项目资源权限，服务器在GoogleCloud上也不意味着urllib自动携带其服务账号令牌。
+- **低成本检查办法：** 官方 https://docs.cloud.google.com/storage/docs/request-endpoints 明确cookie登录下载入口为https://storage.cloud.google.com/BUCKET_NAME/OBJECT_NAME，因此可由用户在Mac浏览器打开https://storage.cloud.google.com/cnlw/dataset_no_images.zip并选择其Google账号，实际检验该账号是否可读。本代理未代为登录或测试该身份，不声称成功。若仍报账号无get权限，客户端改变User-Agent/重装下载器不能自行获得授权；若成功，仍只补回标注/划分包，完整图片准备另需完成。
+- **涉及文件、验证与未完成项：** 仅追加DPCO_dev.md，git diff --check通过。官方依据另含https://docs.cloud.google.com/storage/docs/authentication及https://docs.cloud.google.com/storage/docs/troubleshooting（403排障检查实际caller与目标资源授权）。用户账号的真实读取权限、文件当前存在状态及认证下载结果均未知；没有执行长任务或改变已有实验。
+
+### 2026-10-31 / DPCO-0058：核对近年顶会加噪协议并建议ImageNet受控机制验证
+
+- **用户请求、范围与授权：** 用户询问其他适合数据集、ImageNet100/1K手动加噪是否可行以及近两年顶会采用的方式。本轮读取协议、查2025/2026会议原文及作者噪声生成代码，2024自然数据工作仅作补充候选。只提出研究设计并记录，不将讨论视为新增ImageNet加噪功能授权；不改源代码/配置/依赖、不下载大数据或启动训练。
+- **近期直接先例：** NeurIPS2025 Enhancing Sample Selection Against Label Noise by Cutting Mislabeled Easy Examples（Early Cutting），官方论文https://proceedings.neurips.cc/paper_files/paper/2025/file/3e826f682178d9830a3b704141b4989e-Paper-Conference.pdf，第4.2节/表5在完整ImageNet1K使用40%合成对称标签噪声、ResNet50；附录D.2比较Symmetric/Instance-dependent并描述Asymmetric/Pairflip，主要CIFAR比较20/40%，另用CIFAR-N与WebVision自然噪声。作者tmllab/2025_NeurIPS_MEE/noise_build.py（blob49c7d4d3e8ae8541e98229211c393a148da6bd1a）实际包含dataset_split_imagenet及对称转移矩阵，矩阵对角1-r、非对角r/(K-1)，返回actual_noise。其训练主要采用SGD，不将其lr/优化器直接移植为DPCO+Adam最优配置，也不声称已复现该论文成绩。
+- **其他论文核实：** ICCV2025 Joint Asymmetric Loss for Learning with Noisy Labels，https://arxiv.org/html/2507.17692v1 的B.1与表3/4/5：CIFAR对称20/40/60/80%、非对称10/20/30/40%、IDN20/40/60%，非对称CIFAR10采用TRUCK→AUTOMOBILE、BIRD→AIRPLANE、DEER→HORSE、CAT↔DOG，CIFAR100在superclass内循环，IDN沿PDN，另有CIFAR-N。ICLR2026 Resurfacing the Instance-only Dependent Label Noise Model through Loss Correction，https://proceedings.iclr.cc/paper_files/paper/2026/file/a92200bd6703e81346b0f3c043aabba4-Paper-Conference.pdf，使用Xia2020协议的IDN；实验为二分类子任务，28/44%且另有Clothing1M，不能当作ImageNet多分类直接基线。上述为核对的代表性先例，未做全领域频次统计，不宣称一种协议是唯一标准。
+- **噪声定义与可追踪性：** y_i为基准数据原标签、tilde_y_i为固定污染训练标签、m_i=1[tilde_y_i!=y_i]。对称错标从其余K-1类选取，避免把包含原类的重采样概率等同实际错误率；非对称/Pairflip限制错误目标类别，随意按类别编号循环不自动等于语义相似；IDN使P(tilde_y|x,y)随样本特征变化，属于合成噪声而非自然错标，不局限于均匀随机。若采用已发表IDN生成器应固定源版本、生成方式与seed，不能按DPCO自身align动态制造噪声。固定比例选样与Bernoulli选样也需区分，并报告实际错标率。原始ImageNet标签仍可能有残余错误，所谓原标签指标是相对基准标签，不保证每张语义真值正确。
+- **面向DPCO的建议而非论文既定要求：** 优先复用已有ImageNet100做0/20/40%对称噪声，再在20%增加已发表IDN协议；固定100类列表、样本/划分和噪声manifest，在Adam/Filter/Flip之间配对复用，训练seed和noise seed分开记录。模型先保持现有ResNet50及一致初始化/增强，ref beta=.9只作为此前候选而非新数据最优值。待机制现象稳定再扩ImageNet1K 20/40%，不因类别/规模大就推定更适合机制验证。评估clean训练子集按原标签CE/acc、污染子集按原标签与污染标签acc、全部训练集按原标签acc、干净验证集CE/acc，并审计负align在污染/clean上的比例及检测precision/recall；污染mask/原标签仅用于离线评价，不输入reference、样本权重或优化器。三seed/超参选择需保持干净验证集与最终测试用途区分，此轮未生成新启动命令。
+- **自然数据候选及限制：** 保留CIFAR100N，CIFAR10N可补人类错标控制验证；WebVision/Clothing1M可测自然噪声泛化，但不能假设全部噪声训练图都有配对真值。补查NeurIPS2024 Datasets&Benchmarks Noisy Ostracods，作者H-Jamieu/Noisy_ostracods README明确final为原噪声标签、clean为专家清洗且仍更新，提供SharePoint图像/标签链接；当前公开树仅明确见clean_val.csv与clean_test.csv，不能据此承诺全训练集clean真值或直接替代CNWL审计，未下载验证链接。CNWL32仍是自然噪声泛化补充，保留0053已确认的缺失clean mask限制。
+- **验证与未完成项：** 仅追加本开发文档，git diff --check通过。CVF部分PDF入口本轮403，JAL的具体协议改由作者arXiv完整文本核对；其ICCV归属来自CVF检索与会议条目。未完整核对当前ImageNet读取器改动量、复现IDN生成器或确认全部候选下载可用；研究方案不保证DPCO优于Adam，亦不将合成噪声结果外推为自然噪声结论。
+
+### 2026-10-31 / DPCO-0059：按用户偏好改为优先研究固定类别映射的非对称错标
+
+- **用户依据、目的与边界：** 用户选中非对称噪声及ICCV2025 JAL示例，希望先研究“人为指定成某类、持续出现”的错标。本轮将0058优先对称的建议调整为优先固定类别映射的非对称控制验证，仅讨论定义并记录；按AGENTS明确修改要求的约定，未把偏好表述延伸为源代码/配置修改授权，未启动正式实验。
+- **定义与持续性：** 预先给定源类别到错误目标的映射f(a)，要求目标属于固定ImageNet100类别且f(a)!=a；在每个选定源类按比例r_a选样，改标后整个训练固定，三方法使用同一标签manifest。固定错误去向不意味着将源类100%样本全改错，也不意味着每个epoch重新采样；未映射类别默认不改。单向A→B、双向A↔B及多源→同一目标是不同设置，需分别声明，不能将任意编号循环叫作语义混淆。
+- **噪声比例语义：** 定义T[a,a]=1-r_a、T[a,f(a)]=r_a（对于映射源类），其余未映射行T[a,a]=1。r_a为该源类内部错标比例，全局期望错误率为sum_a (N_a/N)*r_a；实际率以保存后的tilde_y!=y计数。例子为均衡100类中10个源类各改20%，全局约2%，不能报告全局20%。建议先用类内20/40%保留源类正确监督；100%整类错标可能使语义恢复缺乏监督辨识，属于另一困难设置，不作为自然噪声的同义词。
+- **论文先例与ImageNet边界：** 再核对https://arxiv.org/html/2507.17692v1#A2.SS1，JAL示例为CIFAR10特定单/双向类别混淆，CIFAR100在superclass内循环。把其思路应用于当前ImageNet100是自定义、需公开的映射协议，不是论文已定义的ImageNet官方映射。当前manifest固定100个synset与原ILSVRC索引，尚未核对全部类别自然名称并选定语义对应；正文只用A/B说明，不编造实际选中类别。现有config的label_noise_percent限MNIST，ImageNet不支持该生成器，不能仅改启动参数宣称已支持。
+- **DPCO机制与评价：** 保持基准原标签、固定污染标签和mask只用于离线审计，模型训练仅接触污染标签；在源类/目标类分别评价原标签acc与混淆矩阵，辅以clean训练子集loss、污染原标签acc、干净验证acc及负align检测precision/recall。固定方向错误可产生群体一致梯度并污染EMA reference，因此不保证比随机噪声更易识别或DPCO必优于Adam；用于检验系统偏差下的稳健性。未确定单向/双向/多源映射的最终实验、覆盖类数及实际率。
+- **涉及文件、验证与未完成项：** 只追加DPCO_dev.md，读取现有ImageNet接口/manifest确认上述边界，git diff --check通过。未新增噪声manifest、实现映射、改模型或绘图、下载数据、运行训练、提交或推送。
+
+### 2026-10-31 / DPCO-0060：将非对称噪声目标明确为全局10%/20%
+
+- **用户依据与更正：** 用户认为0059举例的全局2%偏低，明确希望全局至少10%–20%，询问是否难实现。将后续建议目标调整为全局10%和20%；此前2%仅为比例换算例子，不作为正式实验推荐。仅讨论并追加记录，不修改代码或生成训练数据。
+- **定义、推导与示例：** 设可被改标的源类样本占全部训练样本比例为c、这些类共享类内错误率r，则全局期望率q=c*r，故r=q/c，须q<=c。只有均衡类数时c等于源类数/K。均衡100类中50源类各改20%/40%分别对应全局10%/20%；全部100源类各改10%/20%也可达到相同目标。10源类即使全部改错全局也最多10%，无法得到20%。实际不均衡ImageNet应按样本数核算，按固定名额取整分配并保存实际率，不能仅凭类数估算后直接标称精确比例。
+- **实现与实验难点区分：** 依据固定映射、全局名额和noise seed生成一次manifest在算法上直接，真正需审查的是当前100类能否形成足够覆盖的合理错误目标映射，以及类频变化的影响。50源类单向映射是可行的数量示例，未核实能找到50对互不重叠且语义相近的真实类别；不为凑覆盖强称任意映射自然。可按语义组定义多个映射，检查覆盖样本是否足够，再推导类内率。建议保留多数源类正确监督，优先约50%样本覆盖、r约20%/40%实现q10%/20%；不承诺此覆盖在当前manifest已成立或DPCO必受益。
+- **文件、验证与未完成项：** 仅追加DPCO_dev.md，比例由上述代数推导验证，git diff --check通过。原标签/mask仍仅供离线评价，各方法复用同一固定污染标签，0%对照保留。映射表、全局名额接口和生成器尚未实施；未改配置、启动实验、下载、提交或推送。
+
+### 2026-10-31 / DPCO-0061：核对实际ImageNet100类别及语义非对称噪声覆盖可行性
+
+- **用户请求与授权边界：** 用户认为ImageNet100可混淆类不足，要求先分析，若不可行再考虑其他方式，并希望可复用到1K、合理模拟生活中常见错标。本轮仅阅读、映射名称和研究定义；不修改代码/配置、不生成污染标签、不下载图像或模型、不启动实验。保留既有未提交文档。
+- **实际类别核对：** 读取configs/manifests/imagenet100_classes.txt，以raghakot/keras-vis/resources/imagenet_class_index.json逐一核对全部100个原ILSVRC索引与synset一致，保留原顺序。按名称筛选的示例候选组为19种家犬（原index151–268内本项目选中类别）、3种蛇green_mamba/garter_snake/hognose_snake、2蟹rock_crab/fiddler_crab、2灵长类langur/gibbon、2真菌gyromitra/stinkhorn，共28类。家犬组内也不应任意互改；Walker_hound/English_foxhound、Doberman/Rottweiler等只是潜在混淆关系，未测人类/模型混淆率。类别语义相关不等于视觉易混淆，不能用这28个候选推断全部均有可靠错误目标，也不声称28是全100类的覆盖上限。
+- **数量可行性与修订边界：** 若这28类全部可映射且样本均衡，仅作示例c=.28，则q10%需r约35.7%，q20%需r约71.4%。若限制源类内r<=40%以保留多数正确监督，q10/20%分别要求至少25/50%的样本覆盖。此前0060的50类可行只是数量例子，本轮未证明实际manifest有50类可靠近邻；不建议为凑全局20%把无合理邻居的类别强行配对或集中改掉少数类大多数标签。data/、DPCO/data/、DPCO/results/imagenet三个检查位置均不存在，未取得本地ImageNet图像与真实类样本计数，因此10%有希望但未获充分覆盖证据，20%目前不应承诺语义自然性。
+- **优先方案与1K复用：** 先在实际100类中构造可审核的语义近邻候选图，用代表图片或独立干净开发数据的混淆统计核查，只保留合理目标、允许无近邻类不改，固定方向及污染样本；报告覆盖样本比c再推导能否达到全局10/20%。1K复用的是候选筛选/审核、全局名额、固定noise seed及记录规则，不是强制使用同一数值映射矩阵。100类之外的目标不能直接作为100分类器的标签；1K候选更丰富通常提供更多细粒度近邻，但未量化可达覆盖率。若静态语义映射覆盖不足，再讨论语义约束下按图片难度生成IDN：困难/模糊图更易错，错误集中于合理近邻，由独立固定生成器确定，仍为合成且不能宣称等同真实人工噪声，不使用DPCO align反向塑造噪声。
+- **外部证据与附带线索：** NeurIPS2024 Datasets&Benchmarks论文dopanim: A Dataset of Doppelganger Animals with Noisy Annotations from Multiple Humans（https://proceedings.neurips.cc/paper_files/paper/2024/file/5b44b99d012922011f0be1031a98c4f9-Paper-Datasets_and_Benchmarks_Track.pdf）实际采集15类相似动物、20人、约52000个标注，提供基准真值，人类混淆集中于相似动物组，支持从语义相近组出发的设计动机；不证明本项目28候选类映射或设定10/20%真实。其数据doi10.5281/zenodo.11479589与作者ies-research/multi-annotator-machine-learning的dopanim分支作为额外自然噪声候选，尚未核实下载可用性或训练真值覆盖，不擅自换数据集。CVPR2024 workshop主动清洗论文检索片段同样提及WordNet层级模拟，但正文访问403，不据该片段认定顶会主会协议或复现细节。
+- **产物、验证与未完成项：** 全100类名称、synset、局部/原索引、候选组和检查限制保存results/files/imagenet100_asymmetric_feasibility_20261031/class_audit.json；仅新增诊断JSON和追加本开发文档，git diff --check通过。候选计数28与synset逐项校验由脚本完成；无图像级混淆、语义映射定稿、样本覆盖精确统计、生成器或实验结论，不保证DPCO收益。
+
+### 2026-10-31 / DPCO-0062：降低人工映射优先级并讨论自动模型诱导噪声
+
+- **用户依据与目的：** 用户认为手工寻找合理相似类别费时且效果可能一般。本轮认可人工审核成本，但不把“DPCO效果一般”作为已有实验事实；噪声模拟是否合理与DPCO是否获益须分开验证。追加研究取舍，不修改代码、数据标签、模型或依赖。
+- **建议调整与具体含义：** 降低强行构造50类人工映射的优先级。可考虑固定、独立于Adam/DPCO训练的生成模型为每张图片提供候选错误类和混淆程度，以模糊/难分图片更容易被选中的规则生成10/20%目标全局噪声；目标限当前100或1000类，标签一次生成后固定，保留原标签和mask供离线评价。此为待验证的模型诱导实例依赖合成协议，模拟图片难度与错误去向的关联，不宣称模型错误等同人工错误、不声称为JAL已经给出的ImageNet标准。没有足够合理候选时不能为凑20%保证自然性。
+- **标准协议与自定义协议区分：** 0058查到的作者公开IDN生成器可作为可复现对照，但实例依赖本身不保证错误目标语义相近；若增加独立预训练模型/特征及混淆筛选即需公开新的生成细节。生成模型、标签空间、数据使用/预训练来源、置信度/难度定义、noise seed、名额和实际率必须固定记录；不得使用DPCO当前align或依据DPCO成绩反复重造噪声。100与1K可复用流程，生成成本和候选覆盖尚未测量。
+- **涉及文件、验证与未完成项：** 仅追加DPCO_dev.md，git diff --check通过；没有生成模型选型、权重下载、前向推理、加噪实现或训练结果。后续需先决定采用公开标准IDN还是单独定义模型诱导协议并检查可行性；不作收益保证，不将讨论视为代码修改授权。
+
+### 2026-10-31 / DPCO-0063：说明错误目标、样本难度与精确全局名额的示意实现
+
+- **用户请求及范围：** 用户询问模型诱导噪声如何编码、如何识别难预测图片，并提出“最大概率且非正确label”的理解。本轮讲解与内存示例，不修改项目代码/配置/依赖；仅追加记录，没有实际生成训练标签、运行生成模型或启动训练。
+- **区分两个量：** 对固定独立生成器概率p_i(k)，错误目标j_i=argmax_{k!=y_i}p_i(k)；该目标对每个样本都存在，不能单凭它断言样本难。示意难度d_i=max_{k!=y_i}p_i(k)-p_i(y_i)，越大表示相对该生成器越难/更偏向错误类别。p真=.95、p错最大=.03得到d=-.92；.45/.40得到-.05；.15/.70得到+.55。只挑生成器原本top1预测错误的图片会将可加噪比例受限于其错误率，不能无条件承诺全局20%。难度是生成模型的相对代理，不是已测人类困难程度或已校准的人工错误概率。
+- **自定义示意协议：** 对全部样本保存j_i、p真、p错最大，设固定tau=.2示例，以exp(d_i/tau)归一化为权重，用固定seed不放回抽取round(rho*N)个样本，改为j_i。tau控制抽样偏向难度，非Adam/DPCO beta；权重不是精确的最终边际入选概率。无候选合理性过滤的示意版可保证round名额且全部确实改标，但不能保证所有改标符合人类视觉混淆。正式协议若增加合理性候选门槛，必须检查候选数是否足够，不足时不能以随机无关目标静默补满。round引起实际率与目标至多约1/N的偏差应报告。
+- **可复用及数据隔离：** ImageNet100先限制生成器输出为manifest对应100类，再匹配局部ID；1K对应1000类。分批推理只保留上述逐样本摘要即可，不要求在内存常驻N×1000概率矩阵。原标签与mask只用于离线生成和审计，训练Adam/Filter/Flip使用同一份固定污染标签；不从DPCO align/实验成绩反馈调整生成规则。冻结生成器的架构、权重/预训练来源、推理预处理、温度和seed均待明确，不称为已发表ImageNet官方噪声标准。
+- **验证、涉及文件与限制：** 使用现有本地Python/NumPy在内存计算上述3例，再平铺为300样本验证固定seed、不放回抽60条、实际改标60条=20%，无代码文件或数据标签落盘。NumPy权重与不放回接口依据https://numpy.org/doc/stable/reference/random/generated/numpy.random.Generator.choice.html。只修改DPCO_dev.md，git diff --check通过；尚未确定正式噪声协议、模型选型或部署实现，示例不证明噪声自然性或DPCO收益。
+
+### 2026-10-31 / DPCO-0064：核对2025/2026顶会模型标注先例、IDN差异及CLIP候选
+
+- **用户请求与授权范围：** 用户希望寻找可作为固定标杆的模型，同时判断哪些图易混淆及易错成何类，明确要求先搜索梳理、不改代码。本轮查询官方会议页、论文正文/附录、作者公开预印本及少量作者代码；不修改程序、配置、脚本、依赖，不下载模型/图像，不运行推理或训练。仅追加研究记录，保留已有修改。
+- **关键更正：** IDN只要求标签噪声分布随实例变化，不自动意味着由强分类器估计难度，也不保证实例翻转概率随视觉困难上升。0062/0063的d=max错误概率-真类概率以及exp(d/tau)加权定额抽样是本项目讨论中的自定义原型，并非已确认的近两年统一协议。查到的近期相关文献存在模型伪标注与随机特征式IDN两条路线，不将二者混称为“模型模拟人工标注”。
+- **AAAI2025最直接分类先例：** Pre-Trained Vision-Language Models as Noisy Partial Annotators，官方DOI https://doi.org/10.1609/aaai.v39i20.35417 ，官方摘要/已索引PDF明确用预训练CLIP为图像自动标注，多prompt各给预测，组成可能不含真类的候选标签集合，研究noisy partial label learning。对应同作者公开预印本标题Pre-Trained Vision-Language Models as Partial Annotators，https://arxiv.org/html/2406.18550v1，4.1明确生成模型CLIP ViT-B/32；PreAct ResNet18是下游学习骨干，不是噪声生成模型。预印本还明确描述另一单标签路线：对多prompt预测概率取平均再argmax；论文重点采用候选集合。正式AAAI PDF本轮访问被BotStopper拒绝，ViT-B/32细节由同作者预印本核实，不能伪称逐项核对最终版本。多prompt个数本轮未可靠核实，故不引用二手来源的27个数值。该工作噪声来自模型自然预测错误，没有查到它规定ImageNet100/1K精确10/20%或使用我们的margin采样。
+- **ICML2026模型诱导噪声先例及领域边界：** MIND: Decoupling Model-Induced Label Noise via Latent Manifold Disentanglement，正式会议记录https://proceedings.mlr.press/v306/ren26i.html，正文https://arxiv.org/html/2605.16081v1。区分CIFAR100合成IDN验证与S3DIS/ScanNet三维结构噪声，后者列KPConv/MPRM/PCAM来源，并在OpenSeg实验直接将VLM预测当有噪伪标签。它支持固定模型的系统性实例依赖错误这一动机，但OpenSeg为分割语境，不能直接当作ImageNet1K分类噪声标准，亦不能把引言提及CLIP/SAM说成实验统一采用两者标注。未查到可直接复用的ImageNet分类固定错标率协议。
+- **近年标准IDN对照：** NeurIPS2025 Early Cutting的官方论文https://proceedings.neurips.cc/paper_files/paper/2025/file/3e826f682178d9830a3b704141b4989e-Paper-Conference.pdf及tmllab/2025_NeurIPS_MEE/noise_build.py 99–132行（blob49c7d4d3e8ae8541e98229211c393a148da6bd1a）实际采截断正态flip_rate，采随机高斯W，对输入x计算x@W[y]，屏蔽原标签后softmax决定错误目标，保留原标签概率为1-flip_rate。该代码中flip_rate并非由语义模型难度预测，实例依赖来自错误目标分布等，不保证错误目标人类看来相近。其ImageNet1K主实验为40%对称噪声，不能说在1K使用CLIP造IDN。ICCV2025 JAL https://arxiv.org/html/2507.17692v1#A2.SS1明确沿PDN生成IDN、CIFAR非对称用预定类别映射，未给出本用户设想的ImageNet标杆模型。
+- **与用户设想最接近的明确算法来源（超出近两年，单列）：** ICML2022 From Noisy Prediction to True Label: Noisy Prediction Calibration via Generative Model，https://proceedings.mlr.press/v162/bae22a/bae22a.pdf，附录D.1.1 Algorithm2名为Similarity Reflected Instance Dependent Noise (SRIDN)：先训练分类器，按f_i[y_i]从低置信度开始排序，依次将约n*tau个样本改为argmax_{j!=y_i}f_i[j]。这为“哪些难/错成啥/固定全局名额”提供直接算法依据，但不是2025/2026新协议，不应把其一般训练骨干说明自动认定为噪声生成器架构。采用CLIP替换该生成分类器属于明确需披露的组合适配，不是原论文ImageNet实验复现。没有证据证明近两年存在统一、唯一的ImageNet100/1K标杆模型。
+- **针对DPCO的建议与未定项：** 首个值得评估的固定生成器候选为CLIP ViT-B/32（按上述近期分类标注先例），对固定100/1000类别名称和固定prompt提供图像-文本分数，类别空间切换不要求重新训练分类头。OpenAI官方README https://github.com/openai/CLIP （blobdb56b56e29258cc871fe0e6297bde00436d9180b）证实该型号和对候选类别做零样本softmax的接口。该推荐是有先例的起点，不是已证实最贴近人类或最优模型。需区分直接使用模型top1伪标签（实际率内生，可能不足20%）与受控地选择最难10/20%并取最大非真类（主动合成）；后者可按SRIDN思路公开适配，原margin加权版作为另外自定义协议。先检查噪声转移矩阵、类内错误率、错误样例与prompt稳定性，再确定正式协议，不能按DPCO收益选生成器。softmax数值不是自动校准的人类错误概率，模型易混淆不等于人类易混淆；模型权重/预训练来源、prompt/类别名/预处理、使用训练数据生成噪声的规则和noise seed均需记录，原标签/mask只用于离线构造/评价。
+- **验证与文件范围：** 仅追加本开发文档，git diff --check通过。MIND官方PDF链接为application/octet-stream导致浏览工具未解析，实施细节使用作者arXiv版，不声称已核实代码重现；AAAI与部分CVF入口受访问限制，未将二手搜索页作为技术结论唯一依据。另检索到的AEON当前作者说明为投稿/预印本，partial-label、图数据及无关像素噪声论文不冒充ImageNet单标签主会协议。未生成新数据或运行模型，没有算法收益结论。
+
+### 2026-10-31 / DPCO-0065：说明CLIP型号、AAAI生成模型定位及选型依据
+
+- **用户请求与范围：** 用户先询问是否需两个模型分别判断难度/产生错误标签，后询问CLIP型号和AAAI使用型号是否已足够强。本轮核对OpenAI模型清单、原始CLIP论文Table11、OpenCLIP公开评测和同作者预印本；仅解释并记录，不修改代码、配置或依赖，不下载权重、不做本地性能或显存测试。
+- **角色澄清：** 一个冻结生成器的同一预测向量即可同时给出原标签置信度/竞争间隔和最大非原类，不需两个独立噪声标注器。CLIP可加载现成预训练权重，随后DPCO/Adam所训练的ResNet50为另一用途的模型；AAAI的双网络属于下游Co-Reg净化算法，不是分别完成两项标注职责，也不要求本项目移植该算法。
+- **官方原版型号：** OpenAI/CLIP clip/clip.py _MODELS（blob398a6282cc243e449430d91c2562491fc799929d）列RN50、RN101、RN50x4、RN50x16、RN50x64、ViT-B/32、ViT-B/16、ViT-L/14、ViT-L/14@336px。B/L表示Base/Large，斜线后32/16/14为图像patch边长，不是总输入尺寸；336px版本为更高分辨率。以原论文https://arxiv.org/pdf/2103.00020 Table11（PDF43页）同表ImageNet零样本结果示意，B32为63.2%、B16为68.6%、L14为75.3%、L14-336为76.2%；不把公开验证评测数字当本项目ImageNet100训练表现或概率校准。OpenCLIP README对原CLIP L14另外报告75.5%，存在评测实现/协议差异，最终答复不混用两来源得出精确横向差值。
+- **开放实现与权重区别：** https://github.com/mlfoundations/open_clip 维护更多模型/不同预训练来源，包括ViT-H-14、ViT-bigG-14、DataComp/LAION/DFN等，README列原CLIP L14约75.5%、DataComp1B L14为79.2%等标准ImageNet零样本结果，表明同架构不同权重可有明显差异。其接口也支持SigLIP/SigLIP2等相关但训练目标不同的模型，不能都视为AAAI所用同一原版CLIP。选择时须完整记录架构、权重来源、分辨率、预处理和prompt，而不是只记CLIP或ViT-B32。
+- **AAAI与实验判断边界：** https://doi.org/10.1609/aaai.v39i20.35417 对应论文，型号仍以同作者公开预印本https://arxiv.org/html/2406.18550v1 4.1明确的CLIP ViT-B/32为依据。它是成熟且有相关标注先例的基础型号，并非当前最强。原论文patch更小/模型更大在整体分类评测更强，不自动证明其错误更符合人类、难度排序更好或给DPCO带来更大收益。AAAI实验适用其所列数据集，不构成在本项目ImageNet100上的性能保证。
+- **建议与验证：** 先用固定OpenAI原版ViT-B/32权重建立可复现生成器，必要时以ViT-L/14在同一小样本核查困难排序、错误去向与稳定性；若B32明显产生不合理目标再决定更换，不能根据DPCO收益择优造噪声。该为选型建议，尚无实际错误率、推理耗时或资源实测，不承诺B32足够或大模型必优。仅追加DPCO_dev.md，git diff --check通过，未启动推理/训练或提交推送。
+
+### 2026-10-31 / DPCO-0066：区分CLIP标注器、ResNet预测模型与DPCO训练规则的比较职责
+
+- **用户请求与授权范围：** 用户询问CLIP是否也属于图像分类模型，以及采用CLIP造噪声后是否必须将ResNet上的DPCO与CLIP直接比较。本轮只解释实验设计并追加文档，不修改代码、配置或依赖，不下载权重或运行模型。
+- **概念澄清：** CLIP为图文对齐模型，可用类别文本与图像相似度进行零样本分类；ResNet为本项目下游预测骨干，DPCO为调整样本梯度贡献的训练规则，三者并非同层级替代项。冻结CLIP用于离线生成固定污染标签，不要求把CLIP引入训练期reference或直接与ResNet比赛。主要机制对照保持同数据、同ResNet、同初始化/训练预算与Adam设置，仅改变普通Adam、Filter、Flip的梯度贡献规则；原标签与mask只用于离线生成及诊断，训练输入使用污染标签。
+- **比较范围与证据边界：** 为回答DPCO是否改善同骨干有噪训练，CLIP零样本成绩不是替代主要Adam对照的必要条件；报告同一干净评估集上的冻结CLIP成绩可作为生成器能力参考。若进一步主张学生超越标注器或优于直接使用CLIP，则必须实际测量对应CLIP基线，并披露外部预训练、输入分辨率、标签空间、prompt和额外资源差异，不能将该比较归因于DPCO单一因素。若目标扩大至噪声学习方法竞争力，另需合适的已有噪声学习方法对照，不等于单纯更换骨干。
+- **避免循环论证：** 以真实标签置信度/间隔选样并强制改为最大非原类的受控协议，不等于完全照抄CLIP的自然top1错误，CLIP正确率也不是学生不可超越的上界。噪声来自一个模型会引入该生成器特有的错误结构，不能因此声称符合人类自然噪声；后续可用另一生成器或另一类噪声协议检验泛化，不能根据DPCO收益反复改造同一数据。
+- **涉及文件、验证与未完成项：** 仅追加DPCO_dev.md，内容依据0063至0065既有已核实模型接口及研究设计推论，未产生实验结果。本轮不新增文献性能主张；尚未测量任何CLIP或新噪声训练结果，比较范围需依论文主张进一步确定。
+
+### 2026-10-31 / DPCO-0067：按用户统一覆盖ImageNet100与1K的目标建议固定CLIP ViT-L/14
+
+- **用户依据及范围：** 用户希望选型一步到位，并考虑未来ImageNet1K，询问是否应使用ViT-L/14。本轮调整0065中以低成本试探为优先的选型建议，仅讨论和记录；不视为代码修改、权重下载、数据生成或训练授权。
+- **建议及依据：** 在用户优先统一长期协议、接受更高离线推理成本的条件下，建议固定OpenAI原版CLIP ViT-L/14、官方224像素预处理、冻结权重作为生成器，而非先B32后更换。原CLIP论文Table11 L14为75.3%、B32为63.2%，支持整体分类能力更强，不证明其噪声更像人工或DPCO收益更大。336像素版本可用但本轮不建议默认增加该成本，未测本项目吞吐、显存或TPU兼容性。
+- **类别规模与协议边界：** B32同样可直接比较1000条类别文本，1K不构成必须L14的技术要求。100与1K可复用同一权重、文本模板和生成流程，各自候选类别空间需限于本数据集且固定类别名称与索引；扩充候选类别会改变最大错误类别、softmax归一化与难度分布，不能直接将100类的概率阈值或已生成噪声映射当作1K协议。目标10/20%可各自按固定规则定额生成，仍须审核合理候选覆盖与报告实际率。
+- **比较及资源设计：** CLIP仅离线前向，保存可复用预测摘要与固定污染标签，三种ResNet50训练共同使用同一份标签；不同训练seed不必重新运行CLIP，noise seed需另行记录。完整记录架构、checkpoint来源/哈希、预处理、类别文本、prompt聚合、难度与选样规则，避免仅写ViT-L14导致权重混用。需要时同一干净评估集报告冻结CLIP的零样本成绩作附加参考，不替代Adam与DPCO的同骨干对照。
+- **文件、验证及未完成项：** 仅追加DPCO_dev.md；复核https://github.com/openai/CLIP和https://arxiv.org/pdf/2103.00020的既有官方接口与研究依据，git diff --check通过。暂无本项目模型推理、自然性审核、资源实测或DPCO收益证据，具体生成算法仍待用户授权实现。
+
+### 2026-10-31 / DPCO-0068：实现冻结OpenAI CLIP ViT-L/14的ImageNet固定比例噪声、人工抽查及训练接入
+
+- **用户明确授权：** 本轮用户要求“完成OpenAI已经训练好的CLIP ViT-L/14权重的代码和实现对现有imagenet100的固定比例加噪，固定比例可由参数控制”，同时要求可复现、保留原标签/噪声标签并支持人工抽样与原训练集acc等指标。授权限实现、必要本地验证与文档，不扩展为正式权重/图片下载、全量推理、服务器操作或正式训练；保留此前未提交的开发文档变更，无提交/推送。
+- **生成模块与官方来源：** 新增src/data/imagenet_clip_noise.py和scripts/prepare_imagenet_clip_noise.py，提供score/generate/verify/audit/all阶段。OpenAI/CLIP固定commit d05afc436d78f1c48dc0dbf8e5980a9d471f35f6（通过作者GitHub API核实），使用官方ViT-L-14.pt、SHA256 b8cca3fd41ae0c99ba7e8951adf17d267cdb84cd88be6f7c2e0eca1737a03836和官方224预处理。核对https://raw.githubusercontent.com/openai/CLIP/main/clip/clip.py中的下载校验/加载接口，以及README的零样本用法；CLIP不训练、不微调，eval、冻结参数、inference_mode、FP32和确定性选项。CPU/CUDA可选，未声称支持TPU推理。1K候选文本按64条分批编码以限制显存；图片batch可控。
+- **固定比例协议及与前期讨论的关系：** 沿用0063的候选j=argmax非原类概率、难度d=p(j)-p(y)、权重exp(d/tau)，默认tau=.2、noise_seed=0。将示意numpy.choice实现为显式PCG64随机数的Gumbel top-k排序，无放回抽floor(N*r/100+.5)条并强制改为j；是同类加权不放回采样，完整排序使同seed/温度的10%污染集合包含在20%中。比例为全局，记录各类改标计数和实际整数比例；126689条的20%为25338条，约20.000158%。tau为未调优原型默认值；其权重不是最终边际入选概率。这是项目自定义受控模型诱导合成协议，不是AAAI/官方ImageNet原样协议，更不等于自然人工噪声。没有证据承诺合理候选足够、DPCO更优或L14最接近人的错误。
+- **不可变产物、复现和断点：** 读取已完成images.sqlite，不改原库，不在训练时下载图片或运行CLIP。每batch预测事务提交SQLite，可中断续跑，拒绝来源/模型/prompt/软件版本/device/batch等身份不一致的旧缓存。发布labels.npz、labels.csv、transition.csv、summary.json、noise_manifest.json，保留sample_id、source_index、图片SHA256、原/污染/候选标签、mask、概率和难度，以及权重/实现哈希、类别文本、源数据身份和生成参数。文件带校验、manifest最后发布，已有产物拒绝覆盖；同一CLI请求可校验复用。verify重新从分数/seed/规则重建标签并比较。跨硬件浮点预测不保证逐位相同，以保存后的标签及manifest哈希为复现依据。官方模型下载器本身不保证断点续传；分batch评分续跑不应误称权重下载续传。发布阶段若异常留下半成品需换新输出目录、复用已完成评分缓存，失败关闭。
+- **人工抽查：** 新增离线HTML、缩略图、review.csv、audit.json；默认独立audit_seed=42，从污染与未污染组各均匀抽最多100张，并记录具体ID和被审manifest哈希。展示原/训练/候选类别、概率和难度，预留人工合理性/备注列，不读取人工意见自动改训练标签。图片导出时核对字节SHA；展示全图缩略图并明确CLIP中心裁剪视野不同。保护已有人工抽查目录；需要新抽样可指定新audit-dir。不能将分组等额抽样未经加权当总体估计，不按DPCO收益选择噪声。
+- **训练和指标接入：** src/config.py、src/training/launch.py新增noise_manifest及父子CLI透传，--noise-manifest自动设ImageNet noisy/clip_idn/非人工模式；训练端不重生成标签，生成seed/比例从manifest读取，原--noise-percent仍仅断言实际率。旧无manifest配置序列化不新增字段，保留旧checkpoint恢复兼容。src/data/classification.py使用全量已准备源并核对artifact来源/原标签/source indices，smoke仅裁切读视图。NoisyImageNetImages的训练batch仍仅图片/污染标签/valid_mask，原标签与mask只用于评价，不进入梯度/EMA/Adam。scripts/train_classification.py接入既有clean、corrupted_noisy、corrupted_original分组；src/training/evaluation.py可选新增all_original，将两个原标签组按样本数加权，不重复推理。完整原训练集CE/acc直接记录于group_evaluation.csv；干净validation、step/timing、Adam/DPCO指标沿用原流，best checkpoint仍按独立干净validation选择。旧定理及实时observer对此协议暂拒绝启用，避免误套假设。现有evaluation绘图接口可直接读取。src/training/results.py为新run增加clip_idn标识；scripts/launch_tpu.py在计划中区分artifact内固定参数，避免把训练配置的占位0误报为实际生成参数。
+- **依赖及文档：** pyproject.toml新增可选clip依赖（固定官方Git commit、torch/torchvision、filelock等）；src/data/images.py将JAX batch导入推迟到实际迭代时，因此离线准备/验证无需导入JAX，不改变训练变换/排序行为。新增docs/imagenet_clip_noise.md，提供服务器CPU版PyTorch安装、权重下载/评分/生成/抽查、缓存复用及后续套件接入命令。长命令均nohup、独立日志、stdin=/dev/null、后台&及PID；默认产物results/files、日志/PID results/logs，未启动任何命令到服务器。GPU准备机可自行匹配CUDA安装；现有TPU机的cpu参数只用CPU，成本尚未实测。
+- **本地验证：** 新增tests/test_imagenet_clip_noise.py共8项，使用小型编码图片/模拟预测器，覆盖精确名额0/20/33.3/40/100%、同seed重建、嵌套与异seed、文件篡改拒绝、分batch中断续跑/身份拒绝、审查seed与图片哈希、原标签隔离、shuffle恢复、不同噪声数据指纹恢复拒绝、空分组端点、全原标签组损失、CLI生成/验证/抽查及父子参数透传。实际调用Adam/Filter/Flip三个训练入口，使用微型ResNet与合成数据各两步，核验各类CSV、best/final/checkpoint及p50恢复结果逐位一致。73项数据/配置/套件/模型/训练/旧checkpoint回归通过，另7项既有绘图测试通过；随后新加端点测试使新增测试总数为8，最终8项全部通过，最后重查套件及新增路径通过。初次合并测试环境缺matplotlib的两项错误，在已有绘图环境单独重跑全部7项通过，未为环境问题改变产品代码；初次损失断言约6.7e-7浮点差改为1e-6绝对容差。独立无JAX/torch的已有Python环境验证离线模块导入通过；git diff --check通过。
+- **证据边界及未完成项：** 本机没有安装torch/CLIP或实际ImageNet图片缓存，未下载大型权重，未执行真正L14前向或验证服务器CPU/GPU吞吐/显存。测试中的预测器和微型ResNet只是接口、数值和恢复验证，不代表真实噪声自然性或DPCO收益。待用户服务器完成真实评分、检查抽样与类转移后再开展正式训练；后续训练超参数、噪声合理性判断和跨生成器泛化均未由本次实现证明。

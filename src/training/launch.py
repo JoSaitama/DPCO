@@ -41,6 +41,7 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--is-human", action=argparse.BooleanOptionalAction, default=None,
                         help="Use released labels (CNWL: human-verified web noise); CIFAR --no-is-human samples the empirical transition matrix")
     parser.add_argument("--noise-seed", type=int, help="Synthetic labels only; official default 0")
+    parser.add_argument("--noise-manifest", help="ImageNet only: fixed CLIP noise_manifest.json; sets noisy/clip_idn mode")
     parser.add_argument("--noise-percent", "--expected-noise-percent", dest="noise_percent", type=float,
                         help="Expected ACTUAL mismatch percentage (0..100), checked after loading; never generates noise")
     parser.add_argument("--label-noise-percent", type=float,
@@ -89,7 +90,7 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--diagnostic-audit-seed", type=int)
 
 
-CIFAR_OPTIONS = ("noise_type", "is_human", "noise_seed", "noise_percent", "download", "label_noise_percent", "cnwl_noise_percent")
+CIFAR_OPTIONS = ("noise_type", "is_human", "noise_seed", "noise_percent", "download", "label_noise_percent", "cnwl_noise_percent", "noise_manifest")
 
 
 def cifar_overrides(args):
@@ -155,6 +156,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    noise_type=None, is_human=None, noise_seed=None, noise_percent=None, download=None,
                    label_noise_percent=None,
                    cnwl_noise_percent=None,
+                   noise_manifest=None,
                    checkpoint_every_steps=None, checkpoints=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
                    diagnostics=None, diagnostic_steps=None, diagnostic_update_check=None,
@@ -229,6 +231,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                        prepared_dir=directory, class_manifest=manifest)
         if dataset != config.data.name:
             changes["cnwl_noise_percent"] = 20
+            changes["noise_manifest"] = None
         if dataset == "cnwl" and config.data.name != "cnwl":
             changes.update(image_size=84, mode="noisy", noise_type="red", is_human=True,
                            noise_seed=0, noise_percent=None, label_noise_percent=0., download=False)
@@ -277,6 +280,9 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
         active_type = noise_changes.get("noise_type", config.data.noise_type)
         noise_changes["noise_percent"] = 0. if active_type == "clean100" else None
     config = replace(config, data=replace(config.data, **noise_changes))
+    if noise_manifest is not None:
+        config = replace(config, data=replace(config.data, noise_manifest=str(noise_manifest),
+            noise_type="clip_idn", is_human=False, mode="noisy"))
     if data_dir is not None:
         config = replace(config, data=replace(config.data, prepared_dir=data_dir))
     if model is not None:
@@ -301,7 +307,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     elif eval_every_epochs is not None:
         config = replace(config, evaluation=replace(config.evaluation,
             mode="epochs", interval=eval_every_epochs))
-    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist", "cnwl"):
+    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist", "cnwl") and not config.data.noise_manifest:
         raise ValueError("Only data-mode=clean is implemented; mismatch modes are reserved, not silently simulated")
     if steps is not None:
         if steps <= 0:

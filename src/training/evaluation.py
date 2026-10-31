@@ -44,6 +44,7 @@ class GroupedEvaluation:
     primary: EvaluationSpec
     groups: tuple
     select_best: bool = False
+    include_all_original: bool = False
 
     @property
     def mode(self):
@@ -63,6 +64,12 @@ class GroupedEvaluation:
             rows.append(dict(group=name, label_source=label_source,
                 sample_count=values["eval_sample_count"], ce=values["val_ce"],
                 top1=values["val_top1"], top5=values["val_top5"]))
+        if self.include_all_original:
+            original = [row for row in rows if row["label_source"] == "original" and row["sample_count"]]
+            count = sum(row["sample_count"] for row in original)
+            rows.append(dict(group="all_original", label_source="original", sample_count=count,
+                **{key: sum(row[key] * row["sample_count"] for row in original) / count
+                    for key in ("ce", "top1", "top5")}))
         return rows
 
 
@@ -87,7 +94,8 @@ def cnwl_evaluation(images, task, batch_size, batch_metrics=None):
     return GroupedEvaluation(primary, tuple(groups))
 
 
-def noisy_classification_evaluation(images, task, batch_size, image_size, mode, batch_metrics=None):
+def noisy_classification_evaluation(images, task, batch_size, image_size, mode, batch_metrics=None,
+                                    *, include_all_original=False, select_best=False):
     from src.data.images import evaluation_batches
     primary = EvaluationSpec(task, lambda: evaluation_batches(images, batch_size, image_size),
         images.counts["validation"], mode, batch_metrics)
@@ -101,4 +109,5 @@ def noisy_classification_evaluation(images, task, batch_size, image_size, mode, 
             lambda ids=ids, view=view: evaluation_batches(view, batch_size, image_size, split="train", indices=ids),
             len(ids), "fixed_train_eval_no_augmentation", batch_metrics) if ids else None
         groups.append((name, labels, spec))
-    return GroupedEvaluation(primary, tuple(groups))
+    return GroupedEvaluation(primary, tuple(groups), select_best=select_best,
+        include_all_original=include_all_original)

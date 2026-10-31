@@ -8,8 +8,6 @@ import sqlite3
 import numpy as np
 from PIL import Image
 
-from src.data.batch import ClassificationBatch
-
 
 class PreparedImages:
     def __init__(self, path, fingerprint):
@@ -77,6 +75,7 @@ class ImageBatchSource:
         self.order = np.random.default_rng(np.random.SeedSequence([self.seed, self.epoch, 0])).permutation(self.count)
 
     def __next__(self):
+        from src.data.batch import ClassificationBatch
         # Drop the incomplete training tail so BatchNorm never consumes padding.
         if self.cursor + self.batch_size > self.count:
             self.epoch += 1
@@ -115,6 +114,7 @@ class ImageBatchSource:
 
 
 def evaluation_batches(images, batch_size, image_size, *, split="validation", indices=None):
+    from src.data.batch import ClassificationBatch
     indices = list(range(images.counts[split])) if indices is None else list(indices)
     for start in range(0, len(indices), batch_size):
         ids = indices[start:start + batch_size]
