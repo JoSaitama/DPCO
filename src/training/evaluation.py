@@ -71,6 +71,22 @@ def cifar100n_evaluation(images, task, batch_size, batch_metrics=None):
         "official_cifar100_test_eval_no_model_selection", batch_metrics)
 
 
+def cnwl_evaluation(images, task, batch_size, batch_metrics=None):
+    """Web noise has an observed label and clean flag, no closed-set oracle class."""
+    from src.data.images import evaluation_batches
+    primary = EvaluationSpec(task, lambda: evaluation_batches(images, batch_size, 84),
+        images.counts["validation"], "official_cnwl_shared_clean_validation", batch_metrics)
+    groups = []
+    for name, partition, label_source in (("clean", "clean", "original"),
+            ("corrupted_noisy", "corrupted", "observed")):
+        ids = tuple(int(i) for i in images.group_indices[partition])
+        spec = EvaluationSpec(task,
+            lambda ids=ids: evaluation_batches(images, batch_size, 84, split="train", indices=ids),
+            len(ids), "fixed_train_eval_no_augmentation", batch_metrics) if ids else None
+        groups.append((name, label_source, spec))
+    return GroupedEvaluation(primary, tuple(groups))
+
+
 def noisy_classification_evaluation(images, task, batch_size, image_size, mode, batch_metrics=None):
     from src.data.images import evaluation_batches
     primary = EvaluationSpec(task, lambda: evaluation_batches(images, batch_size, image_size),

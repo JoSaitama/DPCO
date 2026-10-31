@@ -34,17 +34,19 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--adam-beta1", type=float)
     parser.add_argument("--adam-beta2", type=float)
     parser.add_argument("--adam-epsilon", type=float)
-    parser.add_argument("--noise-type", choices=("clean100", "noisy100", "symmetric"),
-                        help="CIFAR: clean100/noisy100; MNIST: symmetric")
+    parser.add_argument("--noise-type", choices=("clean100", "noisy100", "symmetric", "red"),
+                        help="CIFAR: clean100/noisy100; MNIST: symmetric; CNWL: red")
+    parser.add_argument("--cnwl-noise-percent", type=int, choices=(0, 5, 10, 15, 20, 30, 40, 50, 60, 80),
+                        help="CNWL only: select the author's Red split; never generates random labels")
     parser.add_argument("--is-human", action=argparse.BooleanOptionalAction, default=None,
-                        help="Use released human labels; --no-is-human samples the official empirical transition matrix")
+                        help="Use released labels (CNWL: human-verified web noise); CIFAR --no-is-human samples the empirical transition matrix")
     parser.add_argument("--noise-seed", type=int, help="Synthetic labels only; official default 0")
     parser.add_argument("--noise-percent", "--expected-noise-percent", dest="noise_percent", type=float,
                         help="Expected ACTUAL mismatch percentage (0..100), checked after loading; never generates noise")
     parser.add_argument("--label-noise-percent", type=float,
                         help="MNIST only: generate this percentage of fixed wrong labels (0..100); 0 is clean")
     parser.add_argument("--download", action=argparse.BooleanOptionalAction, default=None,
-                        help="CIFAR-100N/MNIST: allow missing verified sources to download before preparation")
+                        help="Allow dataset source downloads; CNWL still needs original ImageNet sources in data-dir/raw")
     parser.add_argument("--dataset", choices=tuple(DATASET_CLASSES))
     parser.add_argument("--alternating-first", choices=("sgd", "dpco"),
                         help="First update of alternating DPCO policies; default sgd. Other methods in a suite are unchanged.")
@@ -87,7 +89,7 @@ def add_overrides(parser, *, multiple=False):
     parser.add_argument("--diagnostic-audit-seed", type=int)
 
 
-CIFAR_OPTIONS = ("noise_type", "is_human", "noise_seed", "noise_percent", "download", "label_noise_percent")
+CIFAR_OPTIONS = ("noise_type", "is_human", "noise_seed", "noise_percent", "download", "label_noise_percent", "cnwl_noise_percent")
 
 
 def cifar_overrides(args):
@@ -152,6 +154,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                    adam_beta1=None, adam_beta2=None, adam_epsilon=None,
                    noise_type=None, is_human=None, noise_seed=None, noise_percent=None, download=None,
                    label_noise_percent=None,
+                   cnwl_noise_percent=None,
                    checkpoint_every_steps=None, checkpoints=None,
                    eval_every_steps=None, eval_every_epochs=None, theorem_probes=None,
                    diagnostics=None, diagnostic_steps=None, diagnostic_update_check=None,
@@ -211,20 +214,27 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     if dataset is not None:
         directory = config.data.prepared_dir
         if dataset != config.data.name:
-            if dataset in ("cifar100n", "mnist"):
+            if dataset in ("cifar100n", "mnist", "cnwl"):
                 directory = "../data/" + dataset
             elif dataset == "inaturalist2021":
                 directory = INATURALIST_PREPARED_DIR
-            elif config.data.name in ("inaturalist2021", "cifar100n", "mnist"):
+            elif config.data.name in ("inaturalist2021", "cifar100n", "mnist", "cnwl"):
                 directory = "../data"
         manifest = config.data.class_manifest
-        if dataset in ("inaturalist2021", "cifar100n", "mnist"):
+        if dataset in ("inaturalist2021", "cifar100n", "mnist", "cnwl"):
             manifest = None
         elif dataset == "imagenet100" and manifest is None:
             manifest = "configs/manifests/imagenet100_classes.txt"
         changes = dict(name=dataset, num_classes=DATASET_CLASSES[dataset],
                        prepared_dir=directory, class_manifest=manifest)
-        if dataset == "mnist" and config.data.name != "mnist":
+        if dataset != config.data.name:
+            changes["cnwl_noise_percent"] = 20
+        if dataset == "cnwl" and config.data.name != "cnwl":
+            changes.update(image_size=84, mode="noisy", noise_type="red", is_human=True,
+                           noise_seed=0, noise_percent=None, label_noise_percent=0., download=False)
+            if model is None:
+                config = replace(config, model=replace(config.model, name="resnet50"))
+        elif dataset == "mnist" and config.data.name != "mnist":
             changes.update(image_size=28, mode="noisy", noise_type="symmetric", is_human=False,
                            noise_seed=0, noise_percent=None, label_noise_percent=20., download=False)
             if model is None:
@@ -234,7 +244,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
                            noise_seed=0, noise_percent=None, label_noise_percent=0., download=False)
             if model is None:
                 config = replace(config, model=replace(config.model, name="cifar_resnet34"))
-        elif dataset not in ("cifar100n", "mnist") and config.data.name in ("cifar100n", "mnist"):
+        elif dataset not in ("cifar100n", "mnist", "cnwl") and config.data.name in ("cifar100n", "mnist", "cnwl"):
             changes.update(image_size=224, mode="clean", noise_type=None, is_human=True,
                            noise_seed=0, noise_percent=None, download=False, label_noise_percent=0.)
             if model is None:
@@ -243,6 +253,13 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     noise_changes = {key: value for key, value in (("noise_type", noise_type), ("is_human", is_human),
         ("noise_seed", noise_seed), ("noise_percent", noise_percent), ("download", download),
         ("label_noise_percent", label_noise_percent)) if value is not None}
+    if cnwl_noise_percent is not None:
+        noise_changes["cnwl_noise_percent"] = cnwl_noise_percent
+        if config.data.name == "cnwl":
+            if data_mode is None:
+                noise_changes["mode"] = "clean" if cnwl_noise_percent == 0 else "noisy"
+            if noise_percent is None:
+                noise_changes["noise_percent"] = None
     if config.data.name == "mnist":
         if label_noise_percent is not None:
             if data_mode is None:
@@ -284,7 +301,7 @@ def resolve_config(path, *, mode, steps=None, batch_size=None, seed=None,
     elif eval_every_epochs is not None:
         config = replace(config, evaluation=replace(config.evaluation,
             mode="epochs", interval=eval_every_epochs))
-    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist"):
+    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist", "cnwl"):
         raise ValueError("Only data-mode=clean is implemented; mismatch modes are reserved, not silently simulated")
     if steps is not None:
         if steps <= 0:

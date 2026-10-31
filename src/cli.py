@@ -26,7 +26,8 @@ def main() -> None:
     parser.add_argument("--adam-beta2", type=float)
     parser.add_argument("--adam-epsilon", type=float)
     from src.training.launch import cifar_overrides
-    parser.add_argument("--noise-type", choices=("clean100", "noisy100", "symmetric"))
+    parser.add_argument("--noise-type", choices=("clean100", "noisy100", "symmetric", "red"))
+    parser.add_argument("--cnwl-noise-percent", type=int, choices=(0, 5, 10, 15, 20, 30, 40, 50, 60, 80))
     parser.add_argument("--is-human", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--noise-seed", type=int)
     parser.add_argument("--noise-percent", type=float)
@@ -63,6 +64,10 @@ def main() -> None:
                 if getattr(args, name) is not None}
     config = replace(config, training=replace(config.training, **training))
     noise = {key: value for key, value in cifar_overrides(args).items() if value is not None}
+    if config.data.name == "cnwl" and args.cnwl_noise_percent is not None:
+        noise["mode"] = "clean" if args.cnwl_noise_percent == 0 else "noisy"
+        if args.noise_percent is None:
+            noise["noise_percent"] = None
     if args.noise_type is not None and config.data.name == "cifar100n":
         noise["mode"] = "clean" if args.noise_type == "clean100" else "noisy"
     if config.data.name == "cifar100n" and args.noise_percent is None and any(v is not None for v in (args.noise_type, args.is_human, args.noise_seed)):

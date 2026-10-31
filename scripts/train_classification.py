@@ -44,7 +44,7 @@ def run(args, config, devices, *, status):
         raise ValueError(f"Global batch size {batch_size} must be divisible by {len(devices)} local TPU devices")
     if config.execution.gradient_backend != "jvp":
         raise ValueError("TPU entry requires execution.gradient_backend='jvp' to avoid full training Jacobians")
-    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist"):
+    if config.data.mode != "clean" and config.data.name not in ("cifar100n", "mnist", "cnwl"):
         raise ValueError("Data mismatch modes are not implemented; a label must not silently leave data clean")
     limit = max(32, 2 * batch_size) if args.mode == "smoke" else None
     images, data_identity = open_training_images(config.data, ROOT, limit=limit,
@@ -113,7 +113,10 @@ def run(args, config, devices, *, status):
         evaluation = EvaluationSpec(eval_task,
             lambda: evaluation_batches(images, batch_size, image_size),
             images.counts["validation"], "running_batchnorm_eval", batch_metrics)
-        if config.data.name == "cifar100n":
+        if config.data.name == "cnwl":
+            from src.training.evaluation import cnwl_evaluation
+            evaluation = cnwl_evaluation(images, eval_task, batch_size, batch_metrics)
+        elif config.data.name == "cifar100n":
             from src.training.evaluation import cifar100n_evaluation
             evaluation = cifar100n_evaluation(images, eval_task, batch_size, batch_metrics)
         elif config.data.name == "mnist":
@@ -145,11 +148,14 @@ def run(args, config, devices, *, status):
             "prepared_database": str(images.path), "split_counts": images.counts,
             "smoke_is_not_full_dataset_validation": args.mode == "smoke",
             "normalization": ("MNIST uint8/255; native28 grayscale; no augmentation" if config.data.name == "mnist" else
+                "CNWL TFDS-style OpenCV INTER_AREA84/JPEG72; ImageNet mean/std; train random resized crop/flip; eval full84" if config.data.name == "cnwl" else
                 "CIFAR100 mean/std; train zero-pad4/random-crop32/flip; eval native32" if config.data.name == "cifar100n" else
                 "ImageNet mean/std; train random resized crop and horizontal flip; eval resize/center crop"),
             "input_channels": getattr(images, "channels", 3),
-            "evaluation_split": "official_test_monitor_only_no_best_selection" if config.data.name in ("cifar100n", "mnist") else "configured_validation",
-            "group_evaluation": "fixed reference-label clean/corrupted groups; truth metadata excluded from training batch" if config.data.name in ("cifar100n", "mnist") else None,
+            "evaluation_split": ("official_cnwl_shared_clean_validation" if config.data.name == "cnwl" else
+                "official_test_monitor_only_no_best_selection" if config.data.name in ("cifar100n", "mnist") else "configured_validation"),
+            "group_evaluation": ("clean original-label and corrupted observed-label groups only; web oracle labels unavailable; audit metadata excluded from training" if config.data.name == "cnwl" else
+                "fixed reference-label clean/corrupted groups; truth metadata excluded from training batch" if config.data.name in ("cifar100n", "mnist") else None),
             "train_tail": "drop_last_to_exclude_padding_from_training_batchnorm",
             "evaluation_tail": "padded_with_valid_count_weighting",
             "optimizer": config.training.optimizer,

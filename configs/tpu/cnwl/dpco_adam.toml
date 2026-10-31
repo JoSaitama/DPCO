@@ -1,0 +1,69 @@
+# CNWL official Red Mini-ImageNet, natural web noise, no CARE long-tail sampling.
+# Training parameters are a DPCO comparison preset, not a MentorMix reproduction.
+seed = 42
+global_batch_size = 128
+
+[data]
+name = "cnwl"
+num_classes = 100
+image_size = 84
+mode = "noisy"
+prepared_dir = "../data/cnwl"
+noise_type = "red"
+is_human = true
+noise_seed = 0
+cnwl_noise_percent = 20
+download = false
+
+[model]
+name = "resnet50"
+initialization = "random"
+precision = "float32"
+
+[method]
+name = "dpco"
+negative_weight = -1.0
+
+[reference]
+name = "ema"
+beta = 0.9
+
+[training]
+optimizer = "adam"
+learning_rate = 0.0003
+# Nominal 200 drop-last traversals of the 50,000-image Red20 split.
+total_steps = 78000
+lr_schedule = "cosine"
+min_learning_rate = 0.000001
+adam_beta1 = 0.9
+adam_beta2 = 0.999
+adam_epsilon = 1e-8
+l2_coefficient = 0.0
+
+[execution]
+visible_chips = "0,1,2,3"
+chips_per_process_bounds = "2,2,1"
+port = 8476
+startup_timeout_s = 180
+gradient_backend = "jvp"
+
+[results]
+root_dir = "results"
+
+[logging]
+mode = "steps"
+interval = 50
+csv_flush_steps = 50
+timing_window_steps = 50
+
+[evaluation]
+mode = "steps"
+interval = 390
+
+[checkpoints]
+enabled = true
+latest_every_steps = 1950
+at_epoch_end = false
+
+[probes]
+enabled = false

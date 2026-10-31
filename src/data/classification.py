@@ -8,6 +8,13 @@ def open_training_images(config, base_dir, *, limit=None, progress=None):
     if not directory.is_absolute():
         directory = Path(base_dir) / directory
     directory = directory.resolve()
+    if config.name == "cnwl":
+        from src.data.cnwl import CNWLImages
+        images = CNWLImages(directory, cnwl_noise_percent=config.cnwl_noise_percent,
+            noise_percent=config.noise_percent, download=config.download, limit=limit, progress=progress)
+        if progress:
+            progress(event="data_ready", **images.identity)
+        return images, images.identity
     if config.name == "mnist":
         from src.data.mnist import MNISTImages
         images = MNISTImages(directory, label_noise_percent=config.label_noise_percent,

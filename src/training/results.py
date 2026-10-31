@@ -71,6 +71,8 @@ def make_run_name(config, *, timestamp=None):
     elif config.data.name == "mnist":
         parts += ("symmetric" + format(config.data.label_noise_percent, ".12g"),
                   f"noise_s{config.data.noise_seed}")
+    elif config.data.name == "cnwl":
+        parts += ("red" + str(config.data.cnwl_noise_percent), "official_split")
     # Label newly created decaying-rate runs in logs/files/runs and lifecycle
     # records. Constant names and explicit historical resume names stay unchanged.
     if config.training.lr_schedule != "constant":

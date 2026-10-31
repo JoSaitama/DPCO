@@ -10,7 +10,7 @@ from src.probes.mechanism_config import MechanismConfig
 
 METHODS = ("sgd", "adam", "dpco", "dpco_loo", "dtv", "dtv_loo", "random_flip", "dpco_policy")
 REFERENCES = ("loss", "error", "correct", "ema")
-DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000, "cifar100n": 100, "mnist": 10}
+DATASET_CLASSES = {"imagenet100": 100, "imagenet1k": 1000, "inaturalist2021": 10000, "cifar100n": 100, "mnist": 10, "cnwl": 100}
 IMAGENET_MODELS = ("resnet50", "resnet101")
 CIFAR_MODELS = ("cifar_resnet18", "cifar_resnet34", "cifar_resnet50")
 MNIST_MODELS = ("mnist_cnn", "mnist_mlp")
@@ -35,6 +35,8 @@ class DataConfig:
     download: bool = False
     # MNIST generator control; noise_percent remains an actual-rate assertion.
     label_noise_percent: float = 0.0
+    # CNWL official Red split selector, NOT a label-noise generator.
+    cnwl_noise_percent: int = 20
 
 
 @dataclass(frozen=True)
@@ -232,8 +234,22 @@ class RunConfig:
             raise ValueError("label_noise_percent must be finite and in [0, 100]")
         if self.data.name != "mnist" and generated_noise != 0:
             raise ValueError("label_noise_percent is a MNIST-only generator control")
+        if self.data.name != "cnwl" and self.data.cnwl_noise_percent != 20:
+            raise ValueError("cnwl_noise_percent requires dataset=cnwl")
         cifar_models = CIFAR_MODELS
-        if self.data.name == "cifar100n":
+        if self.data.name == "cnwl":
+            selected = self.data.cnwl_noise_percent
+            if isinstance(selected, bool) or selected not in (0, 5, 10, 15, 20, 30, 40, 50, 60, 80):
+                raise ValueError("cnwl_noise_percent must select an official Red split")
+            if self.data.noise_type != "red" or not self.data.is_human or self.data.noise_seed != 0:
+                raise ValueError("CNWL uses fixed released Red web labels; noise_type=red, is_human=true, noise_seed=0")
+            if self.data.mode != ("clean" if selected == 0 else "noisy"):
+                raise ValueError("CNWL data.mode must match the selected official noise split")
+            if self.data.image_size != 84 or self.model.name not in (*IMAGENET_MODELS, *cifar_models):
+                raise ValueError("CNWL requires image_size=84 and a supported ResNet")
+            if self.probes.enabled or self.diagnostics.enabled or self.mechanism.enabled:
+                raise ValueError("CNWL requires legacy observers off; correct labels for web noise are unavailable")
+        elif self.data.name == "cifar100n":
             if self.data.noise_type not in ("clean100", "noisy100"):
                 raise ValueError("CIFAR-100N noise_type must be clean100 or noisy100")
             expected_mode = "clean" if self.data.noise_type == "clean100" else "noisy"
@@ -356,7 +372,11 @@ class RunConfig:
             raise ValueError("data.mode must be a safe name such as clean or mismatch10")
 
     def as_dict(self) -> dict:
-        return asdict(self)
+        result = asdict(self)
+        if self.data.name != "cnwl":
+            # Preserve existing dataset metadata and checkpoint resume identities.
+            result["data"].pop("cnwl_noise_percent")
+        return result
 
 
 def load_config(path: str | Path) -> RunConfig:

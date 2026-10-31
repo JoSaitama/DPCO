@@ -28,6 +28,14 @@ with `--model`: CIFAR also accepts the existing `resnet50`/`resnet101` models or
 the native-stem `cifar_resnet50`, alongside 18/34. Model names retain distinct
 architectures rather than silently switching stems.
 
+[CNWL Red Mini-ImageNet](docs/cnwl.md) connects the author's natural web-noise
+splits to Adam/EMA/filter/flip at 84x84. `--cnwl-noise-percent` selects a released
+noise level; it never generates labels. Prepare with `scripts/prepare_cnwl.py`
+and inspect `bash run_cnwl_suite.sh --dry-run`. Shared clean validation and
+clean/noisy training-group metrics are recorded; web images have no fabricated
+original-class labels. Official metadata/URLs and licensed ImageNet sources are
+required; source availability is checked without dropping missing samples.
+
 [Opt-in TPU mechanism checks](docs/tpu_mechanisms.md) extend the real classification
 suite with both references, absolute LR candidates, a genuinely fixed train-mode
 bank, finite-bank moments and continuous-window accounting. They are off by
@@ -251,9 +259,9 @@ retain all its original settings. Resume permits just one seed/method.
 
 `--methods dpco_e dpco_l sgd` runs each method for each listed seed, in seed-major
 order. The method labels select dpco/error, dpco/loss, or unmodified SGD. Select
-`--dataset imagenet100|imagenet1k|inaturalist2021|cifar100n|mnist` and `--model` from
+`--dataset imagenet100|imagenet1k|inaturalist2021|cifar100n|mnist|cnwl` and `--model` from
 the supported model names (see dataset guides). ImageNet/iNaturalist require
-`--data-mode clean`; CIFAR/MNIST label modes follow their explicit noise controls
+`--data-mode clean`; CIFAR/MNIST/CNWL label modes follow their explicit noise controls
 (`--datamode` is an alias). Other mismatch modes remain reserved and rejected;
 a directory label never silently simulates noisy data. All grid configurations
 are validated before execution. Runs remain worker0-only and serial; failure stops
